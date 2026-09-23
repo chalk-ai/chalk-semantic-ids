@@ -1,0 +1,15 @@
+{
+  "train_rows": 18738,
+  "holdout_rows": 1000,
+  "reconstruction_mse_all": 0.0015087254578247666,
+  "reconstruction_mse_holdout": 0.001734760939143598,
+  "reconstruction_cosine_all": 0.6417883634567261,
+  "codebook_size": 256,
+  "codes_used_per_level": [
+    256,
+    256,
+    256
+  ],
+  "unique_semantic_ids": 19239,
+  "collision_rate": 0.025281183503901072
+}

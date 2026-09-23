@@ -1,0 +1,17 @@
+{
+  "corpus_baseline_cosine": 0.12678901851177216,
+  "all_titles": {
+    "videos": 19738,
+    "groups_scored": 256,
+    "median_group_size": 76.0,
+    "mean_intra_prefix_cosine": 0.3309923149063252,
+    "lift_over_baseline": 0.20420329639455304
+  },
+  "distinct_titles": {
+    "videos": 19289,
+    "groups_scored": 254,
+    "median_group_size": 75.0,
+    "mean_intra_prefix_cosine": 0.3218505521869566,
+    "lift_over_baseline": 0.19506153367518442
+  }
+}
