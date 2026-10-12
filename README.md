@@ -27,6 +27,9 @@ carries meaning.
 | Look | `src/inspect_prefix.py` | prefix groups, printed |
 | Serve | `src/deploy_function.py` | a Chalk function: title → tokens |
 | Prove cold start | `src/verify_cold_start.py` | serving vs local agreement on held-out videos |
+| Torch-free serving | `src/export_numpy_runtime.py` | `artifacts/rqvae.npz`, proof that ONNX + numpy assigns identical IDs |
+| Time cold start | `src/measure_cold_start.py` | seconds for a call that wakes a scaled-to-zero replica |
+| Call from Chalk | [`docs/calling-from-chalk.md`](docs/calling-from-chalk.md) | Chalk SQL, chalkdf and stream-resolver examples |
 
 Every script is a `uv` script with inline dependencies — run them directly, no venv to
 manage.
@@ -102,6 +105,50 @@ The neighbours it prints are the demo itself. An unseen title,
 alongside *"it's delicious to dip the sole of a shoe let alone a pork belly sizzling with
 oil"* and *"Teacher Sha personally cooked for the big eagle to do luxury pilaf!"* — a
 food cluster, reached with no retraining and no ID-embedding table.
+
+## Replica cold start
+
+"Cold start" above means a *video* nobody has watched. This section is about the other
+cold start: a call that arrives while the function has no running replica. Measured on
+staging `oracle-gpu` (`chlkb5466073`, GKE, 2 vCPU replicas on `e2-standard-32` nodes)
+with `deploy_function.py --min-replicas 0`, which scales to zero after ~30s idle and
+holds the first call until a replica serves it:
+
+| Serving stack | Image | First pull onto a node | Cold call, image on node (median) | Trials |
+| --- | --- | --- | --- | --- |
+| torch from PyPI (CUDA wheels), lazy load | 9.1 GB | 2m43s; the held call hit the SDK's 60s timeout | 16.5s | 14.5 / 16.5 / 24.1 |
+| `--cpu-torch`, lazy load | 839 MB | 33s (47s call) | 23.2s | 18.3 / 23.2 / 30.3 |
+| `--cpu-torch --eager-load` | 839 MB | not measured | 13.1s | 11.5 / 11.7 / 13.1 / 14.2 / 16.4 |
+| `--runtime onnx --eager-load` | 443 MB | 11s (18s call) | 8.1s | 6.5 / 7.3 / 8.1 / 8.4 / 10.7 |
+
+Warm calls take ~100ms round trip from the measuring client, for every stack.
+
+Where a torch cold call goes, from pod events and the replica's own log:
+
+- **~3s** until the `main` container starts: the scale-up, pod scheduling, and a
+  `chalkfs-fuse` sidecar that must pass its startup probe first.
+- **~9s** to `import torch` and `sentence_transformers` and load the weights on 2 vCPUs.
+  The imports are nearly all of it: loading both models takes 0.75s.
+- **1–5s** from the server listening to the response arriving (up to ~20s for the lazy
+  stacks, which also import inside the call). This is the platform's routing to a group
+  waking from zero; it varies with when the route picks up the new pod, not with the model.
+
+`--runtime onnx` removes the imports: MiniLM runs through the ONNX export in its own
+Hugging Face repo (pinned revision) and the RQ-VAE encoder runs in numpy, so the
+replica is ready to serve 0.8s after Python starts. `export_numpy_runtime.py` checks
+this path against torch over all 19,738 titles, one title per call as served: 19,738
+identical IDs, max embedding difference 3.2e-7. With the imports gone, the ~3s before
+the container starts and the routing delay make up most of what is left, and neither is
+in this repo's control.
+
+- **`--cpu-torch` cuts the image 11x and the first pull 5x.** A CPU replica never loads
+  the CUDA libraries that PyPI's default torch wheel bundles.
+- **`--eager-load` loads at container start**, so the import cost overlaps pod start-up
+  instead of following it.
+- **HOST compute class rejects `min_replicas=0`** (`HOST scaling groups require 1 <=
+  min_replicas`), so it cannot be compared here.
+- **Raise the SDK's call timeout** (or keep `min_replicas=1`) for the CUDA image: a held
+  first call to a node without it outlasts the 60s default.
 
 ## Serving
 

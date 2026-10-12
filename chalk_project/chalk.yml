@@ -1,0 +1,5 @@
+project: semantic-ids
+environments:
+  default:
+    runtime: "python311"
+    requirements: requirements.txt
