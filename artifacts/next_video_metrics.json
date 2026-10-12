@@ -1,0 +1,87 @@
+{
+  "random": {
+    "feed": {
+      "recall@10_all": 0.00057,
+      "ndcg@10_all": 0.00026724257316855776,
+      "cases_all": 100000,
+      "recall@10_warm": 0.0005784115766447922,
+      "ndcg@10_warm": 0.00027335258668936564,
+      "cases_warm": 95088,
+      "recall@10_cold": 0.00040716612377850165,
+      "ndcg@10_cold": 0.0001489630606142863,
+      "cases_cold": 4912
+    },
+    "new_uploads_shelf": {
+      "recall@10": 0.009771986970684038,
+      "ndcg@10": 0.004010092315689669,
+      "cases": 4912
+    }
+  },
+  "popularity": {
+    "feed": {
+      "recall@10_all": 0.00228,
+      "ndcg@10_all": 0.0011055070687093112,
+      "cases_all": 100000,
+      "recall@10_warm": 0.002397778899545684,
+      "ndcg@10_warm": 0.0011626147029165732,
+      "cases_warm": 95088,
+      "recall@10_cold": 0.0,
+      "ndcg@10_cold": 0.0,
+      "cases_cold": 4912
+    }
+  },
+  "hybrid": {
+    "feed": {
+      "recall@10_all": 0.09092,
+      "ndcg@10_all": 0.05042061624331448,
+      "cases_all": 100000,
+      "recall@10_warm": 0.09555359246171967,
+      "ndcg@10_warm": 0.05300514816745781,
+      "cases_warm": 95088,
+      "recall@10_cold": 0.0012214983713355048,
+      "ndcg@10_cold": 0.0003884559006960562,
+      "cases_cold": 4912
+    },
+    "new_uploads_shelf": {
+      "recall@10": 0.05130293159609121,
+      "ndcg@10": 0.023196297876308496,
+      "cases": 4912
+    }
+  },
+  "id": {
+    "feed": {
+      "recall@10_all": 0.08618,
+      "ndcg@10_all": 0.0487081322252008,
+      "cases_all": 100000,
+      "recall@10_warm": 0.09063183577317853,
+      "ndcg@10_warm": 0.05122426828327528,
+      "cases_warm": 95088,
+      "recall@10_cold": 0.0,
+      "ndcg@10_cold": 0.0,
+      "cases_cold": 4912
+    },
+    "new_uploads_shelf": {
+      "recall@10": 0.006921824104234527,
+      "ndcg@10": 0.0028024313245716267,
+      "cases": 4912
+    }
+  },
+  "semantic": {
+    "feed": {
+      "recall@10_all": 0.03757,
+      "ndcg@10_all": 0.021254118243905582,
+      "cases_all": 100000,
+      "recall@10_warm": 0.039247854618879356,
+      "ndcg@10_warm": 0.022236560225847694,
+      "cases_warm": 95088,
+      "recall@10_cold": 0.00508957654723127,
+      "ndcg@10_cold": 0.002235705544615789,
+      "cases_cold": 4912
+    },
+    "new_uploads_shelf": {
+      "recall@10": 0.04295602605863192,
+      "ndcg@10": 0.020959682712213684,
+      "cases": 4912
+    }
+  }
+}

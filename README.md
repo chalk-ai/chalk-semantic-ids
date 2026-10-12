@@ -30,6 +30,12 @@ carries meaning.
 | Torch-free serving | `src/export_numpy_runtime.py` | `artifacts/rqvae.npz`, proof that ONNX + numpy assigns identical IDs |
 | Time cold start | `src/measure_cold_start.py` | seconds for a call that wakes a scaled-to-zero replica |
 | Call from Chalk | [`docs/calling-from-chalk.md`](docs/calling-from-chalk.md) | Chalk SQL, chalkdf and stream-resolver examples |
+| Train next-video model | `src/train_next_video.py` | `artifacts/next_video_{id,semantic,hybrid}.pt` |
+| Compare models | `src/evaluate_next_video.py` | `artifacts/next_video_metrics.json` |
+| Export for serving | `src/export_next_video.py` | `artifacts/next_video.onnx`, proof that it ranks like torch |
+| Serve recommendations | `src/deploy_next_video.py` | a Chalk function: watch history → 10 next videos |
+| Check serving | `src/verify_next_video.py` | serving vs local agreement on real histories |
+| Recommend from Chalk | [`docs/next-videos-from-chalk.md`](docs/next-videos-from-chalk.md) | Chalk SQL, chalkdf and streaming watch-history examples |
 
 Every script is a `uv` script with inline dependencies — run them directly, no venv to
 manage.
@@ -48,8 +54,9 @@ curl -sS -A "$UA" -O https://recsys.westlake.edu.cn/MicroLens-100k-Dataset/Micro
 
 `MicroLens-100k_title_en.csv` is `<id>, <title>` with **unquoted** titles that contain
 commas, so it must be split on the first comma only — `read_csv(sep=",")` shreds a third
-of the rows. The pairs file (user → watch sequence) is downloaded for the sequential
-model that comes next; nothing here consumes it yet.
+of the rows. The pairs file is one line per user, `<user id>\t<video ids in watch
+order>`: 100,000 users, 719,405 watches, and no video watched twice by the same user.
+The next-video model below trains on it.
 
 ## Results
 
@@ -169,12 +176,89 @@ The codebooks are seeded lazily from real residuals during training, so the serv
 path marks them initialized after loading the checkpoint; otherwise the first inference
 vector would reseed them and every ID after that would be wrong.
 
+## Next-video model
+
+The semantic IDs exist so a recommender can use them. `src/train_next_video.py` trains a
+small causal transformer (SASRec-shaped: 2 layers, 2 heads, 64-d, the last 50 watches)
+that reads a user's watch history and scores every video as the next watch:
+
+```
+[watched video ids] ──▶ video embeddings + positions ──▶ causal transformer ──▶ h
+                                                                                │
+                        score(v) = h · embedding(v), for every video v ◀────────┘
+```
+
+The experiment is what a video's embedding is made of:
+
+- **`id`**: one learned vector per video.
+- **`semantic`**: the sum of one learned vector per semantic-ID token.
+- **`hybrid`**: both. The per-video vector is used only for videos seen in training, and
+  training drops it 30% of the time so the tokens have to carry signal on their own.
+
+The 1,000 videos the RQ-VAE held out play **new uploads**: every watch of them is
+removed from training, and they are left out of the training softmax, so no model
+learns they exist. Each user's last watch is the test target (leave-one-out), ranked
+on two surfaces:
+
+| Model | Home feed: Recall@10 | NDCG@10 | New-uploads shelf: Recall@10 | NDCG@10 |
+| --- | --- | --- | --- | --- |
+| Random | 0.06% | 0.03% | 0.98% | 0.40% |
+| Popularity | 0.23% | 0.11% | n/a | n/a |
+| `id` | 8.62% | 4.87% | 0.69% | 0.28% |
+| `semantic` | 3.76% | 2.13% | 4.30% | 2.10% |
+| **`hybrid`** | **9.09%** | **5.04%** | **5.13%** | **2.32%** |
+
+- **Home feed**: the last watch ranked against every video the user has not watched
+  (100,000 users).
+- **New-uploads shelf**: for the 4,912 users whose last watch was a new upload, that
+  video ranked against the other new uploads, which have no plays for popularity to
+  order by.
+
+**ID embeddings cannot recommend a new upload**: their vectors never trained, so the
+`id` model does no better than random on the shelf. **Semantic tokens can.** A new video
+shares tokens with videos that were watched, and the `semantic` model places it 4.4x
+better than random. On their own, though, three tokens are a lossy fingerprint for
+19,738 videos (2.5% of them collide outright), so `semantic` trails on the feed. The
+`hybrid` is best on both: per-video vectors where history exists, tokens where it does
+not.
+
+One honest gap: in the home feed, a new upload competes with videos that carry an
+extra trained vector, and `hybrid` ranks the true new upload in its top 10 for only
+0.12% of those users. A dedicated new-uploads surface, or score calibration between the
+two kinds of video, is how new videos get exposure; the shelf numbers show the signal
+is there.
+
+### Serving it
+
+`src/export_next_video.py` exports the hybrid to ONNX (10.5 MB, the video table baked in)
+and checks it against torch on 5,000 real histories: identical top-10 lists.
+`src/deploy_next_video.py` deploys it as the Chalk function `next-videos` with
+onnxruntime and numpy, on 1 CPU and 2 GiB:
+
+```
+watched, most recent first:
+    5092  spend 148r to achieve lamb chop free Grilled fish free! It was worth it!!
+    3734  this life on her # fifth personality # fifth personality summer interpretation
+    4769  psychological & patient new couple outfit! Poked in my heart! # 5th Personality
+recommended:
+   17090  🤡🤡🤡🤡🤡 # The Fifth personality # The Fifth Personality Summer Quirks
+    9634  🐒# TheFifth personality # Thefifth Personality Summer Oddities
+     905  # Fifth Personality
+```
+
+`src/verify_next_video.py` checks the deployed function against the local model:
+30/30 histories identical on `oracle-gpu`. Scaled to zero, a first call took 7.0–17.3s
+(median 10.5s), with the model ready 1.1s after the container's Python starts.
+[`docs/next-videos-from-chalk.md`](docs/next-videos-from-chalk.md) calls it from Chalk
+SQL, chalkdf, and a stream of watch events that keeps each user's history current.
+
 ## Next
 
-- **Sequential model**: train SASRec or a T5-style decoder over `[user history → next
-  semantic ID]` using `MicroLens-100k_pairs.tsv`, already downloaded.
+- **Recommend uploads the function has never seen**: the served video table is fixed
+  at export. Building rows for new videos from their tokens at serving time (the
+  `semantic-id-embed` output) would put a fresh upload into the feed without a re-export.
+- **Generative retrieval**: decode the next video's semantic ID token by token (TIGER)
+  instead of scoring every video, which scales to catalogs too large to score in full.
 - **Beyond titles**: the same quantizer accepts any content vector. MicroLens publishes
   extracted image/video/audio features, and the cover images and audio are downloadable
   per video; a multimodal vector would sharpen the clusters that titles alone blur.
-- **Materialize as features**: expose `semantic_id_0..2` as Chalk features so the tokens
-  are joinable at query time rather than living in a parquet file.

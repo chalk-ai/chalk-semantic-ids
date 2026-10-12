@@ -11,7 +11,8 @@ until the scaling group reports `ScaledToZero`, then times one call — scheduli
 pull, container start, torch import, model load and inference all land inside it —
 followed by a few warm calls on the replica that call woke up.
 
-    ./measure_cold_start.py --env-id chlkb5466073 --function semantic-id-embed-s2z --trials 5
+    ./measure_cold_start.py --function semantic-id-onnx-eager --trials 5
+    ./measure_cold_start.py --function next-videos-s2z --payload history --trials 5
 
 The breakdown of a cold call (pull vs. boot vs. load) is not visible from here; read it
 from the pod events and the replica's own log.
@@ -26,12 +27,22 @@ import statistics
 import sys
 import time
 
-TITLES = [
-    "grandma teaches me how to fold dumplings",
-    "unboxing the new electric scooter and riding it downtown",
-    "cat steals fish from the kitchen counter",
-    "the most relaxing lakeside camping trip of the summer",
-]
+PAYLOADS = {
+    # semantic-id functions take a title.
+    "title": [
+        "grandma teaches me how to fold dumplings",
+        "unboxing the new electric scooter and riding it downtown",
+        "cat steals fish from the kitchen counter",
+        "the most relaxing lakeside camping trip of the summer",
+    ],
+    # next-videos takes watched video ids, most recent first.
+    "history": [
+        [17700, 15223, 6346, 1958],
+        [10949, 9500, 3775, 9127, 915, 16657],
+        [5408, 6035, 11377, 8394],
+        [11230, 10743, 6158, 1564, 8723],
+    ],
+}
 
 
 def wait_for_zero(group: object, timeout: float, poll: float) -> float:
@@ -51,6 +62,7 @@ def main() -> int:
     parser.add_argument("--env-id", default="chlkb5466073", help="Chalk environment id (default: oracle-gpu)")
     parser.add_argument("--api-server", default="https://api.staging.chalk.dev")
     parser.add_argument("--function", default="semantic-id-embed-s2z", help="Scaling-group name of the function")
+    parser.add_argument("--payload", choices=sorted(PAYLOADS), default="title", help="What the function takes")
     parser.add_argument("--trials", type=int, default=5)
     parser.add_argument("--warm-calls", type=int, default=5)
     parser.add_argument("--zero-timeout", type=float, default=900.0)
@@ -70,16 +82,16 @@ def main() -> int:
     warm: list[float] = []
     for trial in range(args.trials):
         waited = wait_for_zero(group, args.zero_timeout, poll=2.0)
-        title = TITLES[trial % len(TITLES)]
+        payloads = PAYLOADS[args.payload]
         started = time.time()
         t0 = time.perf_counter()
-        codes = remote.remote(title)
+        codes = remote.remote(payloads[trial % len(payloads)])
         cold_seconds = time.perf_counter() - t0
 
         warm_seconds: list[float] = []
         for index in range(args.warm_calls):
             t1 = time.perf_counter()
-            remote.remote(TITLES[(trial + index + 1) % len(TITLES)])
+            remote.remote(payloads[(trial + index + 1) % len(payloads)])
             warm_seconds.append(time.perf_counter() - t1)
 
         cold.append(cold_seconds)
@@ -91,7 +103,7 @@ def main() -> int:
             "waited_for_zero_s": round(waited, 1),
             "cold_call_s": round(cold_seconds, 3),
             "warm_median_ms": round(1000 * statistics.median(warm_seconds), 1) if warm_seconds else None,
-            "codes": list(codes),
+            "result": list(codes),
         }
         print(json.dumps(record), flush=True)
         if args.out is not None:

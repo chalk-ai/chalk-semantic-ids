@@ -1,0 +1,4 @@
+test_*.py
+chalkdf_example.py
+next_videos_chalkdf.py
+.venv/
