@@ -30,6 +30,8 @@ carries meaning.
 | Torch-free serving | `src/export_numpy_runtime.py` | `artifacts/rqvae.npz`, proof that ONNX + numpy assigns identical IDs |
 | Time cold start | `src/measure_cold_start.py` | seconds for a call that wakes a scaled-to-zero replica |
 | Call from Chalk | [`docs/calling-from-chalk.md`](docs/calling-from-chalk.md) | Chalk SQL, chalkdf and stream-resolver examples |
+| Recommend | `src/build_recommender.py` | next-video model over semantic IDs, `artifacts/recommender_eval.json` |
+| Demo | `demo/deploy_demo.py` | a web page on a Chalk scaling group: encode a title, pick three videos, get the next one |
 
 Every script is a `uv` script with inline dependencies — run them directly, no venv to
 manage.
@@ -149,6 +151,41 @@ in this repo's control.
   min_replicas`), so it cannot be compared here.
 - **Raise the SDK's call timeout** (or keep `min_replicas=1`) for the CUDA image: a held
   first call to a node without it outlasts the 60s default.
+
+## Demo: encode, then recommend
+
+`demo/` serves one page from a Chalk scaling group. Type a title to see its embedding,
+its three tokens and the catalog videos that share its prefix. Pick three watched videos
+(catalog titles, or a title you just encoded) to get the ten most likely next videos.
+
+```bash
+./src/export_numpy_runtime.py     # artifacts/rqvae.npz
+./src/build_recommender.py        # artifacts/recommender.npz, prints the evaluation below
+./demo/deploy_demo.py --fonts-dir ~/chalk-private/marketing-frontend/public/fonts
+```
+
+The page uses the chalk.ai demo styling. `--fonts-dir` bakes Chalk's licensed Everett faces
+into the image (they are not in this repository); without it the page uses system fonts.
+`?embed=1` drops the header so the page can sit in an iframe.
+
+The recommender counts which semantic-ID prefixes follow which across the 100,000
+MicroLens watch sequences, and adds content similarity and per-video transition counts
+(`src/recommender.py`). Each held-out user's last video is the target and the three
+before it are the history, ranked against all 19,738 videos:
+
+| Ranking | In top 10 | In top 50 | New videos, top 50 |
+| --- | --- | --- | --- |
+| Hybrid | 10.7% | 18.6% | 0.7% |
+| Semantic IDs + content | 6.9% | 13.8% | 2.4% |
+| Video-to-video transitions | 10.4% | 17.4% | 0.0% |
+| Content only | 1.9% | 5.1% | 4.2% |
+| Most popular | 0.7% | 1.8% | 0.0% |
+
+"New videos" removes 10% of videos from training entirely and scores the 755 users whose
+next video was one of them. The semantic-ID terms let a brand-new title take part as
+*history*: it has an ID the moment it is encoded. As a *candidate*, a new video still
+ranks best by content similarity; most 2-token prefixes hold one video, so the
+transitions say little about a prefix nobody has watched yet.
 
 ## Serving
 

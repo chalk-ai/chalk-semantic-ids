@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semantic IDs</title>
+<style>
+  /* Chalk marketing palette and type, as on chalk.ai/demos: green ground, chartreuse primary,
+     mint accents, Everett for text and Everett Mono for labels. The fonts are served by this
+     replica when the deploy baked them in; otherwise the system stacks below take over. */
+  @font-face { font-family: "Everett"; font-weight: 400; font-display: swap; src: url("/fonts/TWKEverett-Regular-web.woff2") format("woff2"); }
+  @font-face { font-family: "Everett"; font-weight: 500; font-display: swap; src: url("/fonts/TWKEverett-Medium-web.woff2") format("woff2"); }
+  @font-face { font-family: "Everett Mono"; font-weight: 400; font-display: swap; src: url("/fonts/TWKEverettMono-Regular.ttf") format("truetype"); }
+  @font-face { font-family: "Everett Mono"; font-weight: 500; font-display: swap; src: url("/fonts/TWKEverettMono-Medium.ttf") format("truetype"); }
+  :root {
+    --bg: #224A41; --panel: #1C3B34; --panel-2: #173029; --line: #32645B; --ink: #EFF5F3; --muted: #B9CFC7;
+    --dim: #8FB3A6; --accent: #BBD96D; --mint: #70CD96; --mint-dark: #279467; --orange: #F8947F;
+    --t0: #70CD96; --t1: #BBD96D; --t2: #81CEEA;
+    --sans: "Everett", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "Everett Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--sans); }
+  main { max-width: 1120px; margin: 0 auto; padding: 48px 16px 64px; }
+  html.embed main { padding: 24px 16px; }
+  html.embed header { display: none; }
+  .eyebrow { font: 500 12px/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.5px; color: var(--mint); }
+  header h1 { font-size: clamp(30px, 4vw, 44px); font-weight: 500; line-height: 110%; letter-spacing: -0.8px; margin: 12px 0 16px; }
+  header h1 span { color: var(--mint); }
+  header p { margin: 0; color: var(--muted); max-width: 720px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 36px; }
+  html.embed .grid { margin-top: 0; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  section.wide { grid-column: 1 / -1; }
+  section > .body { padding: 20px; }
+  h2 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line);
+       background: var(--bg); font: 500 12px/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+  h2::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--mint); }
+  .row { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; min-width: 0; padding: 11px 14px; border-radius: 4px; border: 1px solid var(--line);
+                     background: var(--panel-2); color: var(--ink); font: inherit; }
+  input[type=text]::placeholder { color: var(--dim); }
+  input[type=text]:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  button { font: 500 12px/15px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
+           border: 1px solid var(--line); border-radius: 20px; padding: 11px 18px; background: transparent;
+           color: var(--muted); white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+  button:hover { color: var(--ink); border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  button.primary:hover { background: transparent; color: var(--accent); }
+  button:disabled, button:disabled:hover { opacity: 0.45; cursor: default; background: var(--accent); color: var(--bg); }
+  .sid { display: inline-flex; gap: 3px; font: 500 12px/1 var(--mono); }
+  .sid span { padding: 4px 6px; border-radius: 3px; color: var(--panel-2); }
+  .sid span:nth-child(1) { background: var(--t0); } .sid span:nth-child(2) { background: var(--t1); }
+  .sid span:nth-child(3) { background: var(--t2); }
+  .sid.big { font-size: 24px; gap: 6px; } .sid.big span { padding: 10px 14px; border-radius: 4px; }
+  .muted { color: var(--dim); font-size: 13px; }
+  .label { font: 500 11px/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); }
+  .result { margin-top: 18px; }
+  .strip { display: grid; grid-template-columns: repeat(48, 1fr); gap: 1px; margin: 14px 0 6px; border-radius: 2px; overflow: hidden; }
+  .strip i { aspect-ratio: 1; display: block; }
+  ul.list { list-style: none; margin: 8px 0 0; padding: 0; }
+  ul.list li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+  ul.list li:first-child { border-top: 0; }
+  .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .clickable { cursor: pointer; } .clickable:hover .title { color: var(--accent); }
+  .pill { font: 500 11px/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.3px; padding: 3px 8px; border-radius: 999px;
+          border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .pill.good { border-color: var(--mint-dark); color: var(--mint); }
+  .pill.warn { border-color: var(--orange); color: var(--orange); }
+  .pill.accent { border-color: var(--accent); color: var(--accent); }
+  .watched { display: grid; gap: 8px; margin-top: 14px; }
+  .slot { border: 1px dashed var(--line); border-radius: 4px; padding: 10px 12px; min-height: 48px;
+          display: flex; align-items: center; gap: 10px; color: var(--dim); font-size: 14px; }
+  .slot.filled { border-style: solid; color: var(--ink); background: var(--panel-2); }
+  .slot .n { font: 500 12px var(--mono); color: var(--dim); width: 14px; }
+  .x { border: 0; background: none; padding: 2px 6px; color: var(--dim); border-radius: 4px; }
+  .recs li { align-items: flex-start; }
+  .recs .rank { font: 500 13px var(--mono); color: var(--accent); width: 22px; padding-top: 2px; }
+  .recs .body { flex: 1; min-width: 0; }
+  .why { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+  .tokens { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+  .stack { display: grid; gap: 16px; margin-top: 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: right; padding: 9px 10px; border-top: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font: 500 11px/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); border-top: 0; }
+  tr.served td { color: var(--accent); }
+  .err { color: var(--orange); margin-top: 8px; }
+  .modes { display: inline-flex; border: 1px solid var(--line); border-radius: 20px; padding: 3px; gap: 2px; margin-bottom: 14px; }
+  .modes button { border: 0; padding: 8px 14px; }
+  .modes button.on { background: var(--accent); color: var(--bg); }
+  .mode-note { margin: -4px 0 14px; color: var(--muted); font-size: 14px; max-width: 760px; }
+</style>
+<script>
+  if (new URLSearchParams(location.search).has("embed")) document.documentElement.classList.add("embed");
+</script>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Live demo · Semantic IDs</div>
+    <h1>Every video gets an ID<br><span>the moment it is uploaded.</span></h1>
+    <p>A title becomes three tokens: a coarse topic, then finer refinements. Videos that share a prefix are related,
+      and a video nobody has watched gets its ID the moment its title is encoded. The recommender predicts the next
+      video from the semantic IDs of the ones you watched, learned from 100,000 real MicroLens watch sequences.</p>
+  </header>
+
+  <div class="grid">
+    <section>
+      <h2>1 · Encode a title</h2>
+      <div class="body">
+      <form id="encode-form" class="row">
+        <input id="encode-input" type="text" placeholder="e.g. grandma teaches me how to fold dumplings" autocomplete="off">
+        <button class="primary" type="submit">Encode</button>
+      </form>
+      <div id="encode-result" class="result"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>2 · Pick three watched videos</h2>
+      <div class="body">
+      <form id="search-form" class="row">
+        <input id="search-input" type="text" placeholder="Search 19,738 titles, or leave empty for random" autocomplete="off">
+        <button type="submit">Search</button>
+      </form>
+      <ul id="search-results" class="list"></ul>
+      <div id="watched" class="watched"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="recommend" class="primary" disabled>Suggest the next video</button>
+        <button id="clear">Clear</button>
+      </div>
+      </div>
+    </section>
+
+    <section class="wide" id="recs-section" hidden>
+      <h2>3 · Up next</h2>
+      <div class="body">
+      <div class="modes" id="modes">
+        <button data-mode="hybrid" class="on">Hybrid</button>
+        <button data-mode="semantic">Semantic IDs</button>
+        <button data-mode="content">Content</button>
+      </div>
+      <p class="mode-note" id="mode-note"></p>
+      <div id="recs"></div>
+      </div>
+    </section>
+
+    <section class="wide">
+      <h2>How well it predicts</h2>
+      <div class="body">
+      <div id="eval" class="muted">Loading…</div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sid = (codes, big) => `<span class="sid${big ? " big" : ""}">${codes.map((c) => `<span>${c}</span>`).join("")}</span>`;
+const watched = [];
+const SLOTS = 3;
+
+async function api(path, body) {
+  const res = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function strip(values) {
+  const max = Math.max(...values.map(Math.abs)) || 1;
+  // Positive dimensions in mint, negative in orange, fading into the panel as they near zero.
+  return `<div class="strip" title="384-d embedding">${values.map((v) => {
+    const t = Math.min(1, Math.abs(v) / max);
+    const rgb = v >= 0 ? "112,205,150" : "248,148,127";
+    return `<i style="background:rgba(${rgb},${(0.08 + 0.92 * t).toFixed(2)})"></i>`;
+  }).join("")}</div>`;
+}
+
+$("encode-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const title = $("encode-input").value.trim();
+  if (!title) return;
+  const out = $("encode-result");
+  out.innerHTML = `<div class="muted">Encoding…</div>`;
+  try {
+    const r = await api("/api/encode", {title});
+    const group = (depth) => r.neighbours[depth].map((v) =>
+      `<li><span class="title">${esc(v.title) || "<span class=muted>(blank title)</span>"}</span>${sid(v.semantic_id)}</li>`).join("")
+      || `<li class="muted">No catalog video shares this prefix — a new neighbourhood.</li>`;
+    out.innerHTML = `
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">${sid(r.semantic_id, true)}
+        <span class="label">${r.encode_ms} ms on the replica</span>
+        <button id="add-encoded">Add to watched</button></div>
+      ${strip(r.embedding)}
+      <div class="muted">The 384-d MiniLM embedding that the RQ-VAE quantized into those three tokens.</div>
+      <div class="stack">
+        <div><div class="label">Same first two tokens [${r.semantic_id.slice(0, 2).join(", ")}] · ${r.prefix_counts["2"]} videos</div><ul class="list">${group("2")}</ul></div>
+        <div><div class="label">Same first token [${r.semantic_id[0]}] · ${r.prefix_counts["1"]} videos</div><ul class="list">${group("1")}</ul></div>
+      </div>`;
+    $("add-encoded").onclick = () => addWatched({title: r.title, semantic_id: r.semantic_id, new: true});
+  } catch (err) {
+    out.innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  }
+};
+
+$("search-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const q = $("search-input").value;
+  const list = $("search-results");
+  list.innerHTML = `<li class="muted">Searching…</li>`;
+  try {
+    const rows = await api(`/api/search?q=${encodeURIComponent(q)}&n=8`);
+    list.innerHTML = rows.length ? "" : `<li class="muted">No titles match.</li>`;
+    for (const v of rows) {
+      const li = document.createElement("li");
+      li.className = "clickable";
+      li.innerHTML = `<span class="title">${esc(v.title)}</span><span class="muted">${v.views} views</span>${sid(v.semantic_id)}`;
+      li.onclick = () => addWatched(v);
+      list.appendChild(li);
+    }
+  } catch (err) {
+    list.innerHTML = `<li class="err">${esc(err.message)}</li>`;
+  }
+};
+
+function addWatched(v) {
+  if (watched.length >= SLOTS) watched.shift();
+  if (v.video_id != null && watched.some((w) => w.video_id === v.video_id)) return;
+  watched.push(v);
+  renderWatched();
+}
+
+function renderWatched() {
+  const box = $("watched");
+  box.innerHTML = "";
+  for (let i = 0; i < SLOTS; i++) {
+    const v = watched[i];
+    const div = document.createElement("div");
+    div.className = "slot" + (v ? " filled" : "");
+    div.innerHTML = v
+      ? `<span class="n">${i + 1}</span><span class="title">${esc(v.title)}</span>
+         ${v.new ? `<span class="pill warn">new title</span>` : ""}${sid(v.semantic_id)}<button class="x" title="Remove">✕</button>`
+      : `<span class="n">${i + 1}</span>Click a search result, or encode a title and add it`;
+    if (v) div.querySelector(".x").onclick = () => { watched.splice(i, 1); renderWatched(); };
+    box.appendChild(div);
+  }
+  $("recommend").disabled = watched.length === 0;
+}
+
+$("clear").onclick = () => { watched.length = 0; renderWatched(); $("recs-section").hidden = true; };
+
+const MODE_NOTES = {
+  hybrid: "What viewers actually watched next: transitions between semantic IDs, plus how often each video followed one you watched. Best at predicting, but real watch sequences wander off-topic.",
+  semantic: "Transitions between semantic IDs plus content similarity, with no per-video watch counts. Works the same for a brand-new title, which has a semantic ID but no history.",
+  content: "Nearest titles to the average of your history's embeddings. Most on-topic, and the best ranker for new videos, but blind to what people watch next.",
+};
+let mode = "hybrid";
+$("mode-note").textContent = MODE_NOTES[mode];
+for (const b of document.querySelectorAll("#modes button")) {
+  b.onclick = () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll("#modes button").forEach((x) => x.classList.toggle("on", x === b));
+    $("mode-note").textContent = MODE_NOTES[mode];
+    if (watched.length) $("recommend").onclick();
+  };
+}
+
+$("recommend").onclick = async () => {
+  const section = $("recs-section");
+  const out = $("recs");
+  section.hidden = false;
+  out.innerHTML = `<div class="muted">Scoring 19,738 videos…</div>`;
+  try {
+    const history = watched.map((v) => v.video_id != null ? {video_id: v.video_id} : {title: v.title});
+    const r = await api("/api/recommend", {history, n: 10, mode});
+    const tokens = r.predicted_first_tokens.map((t) =>
+      `<span class="pill accent">[${t.token}] ${(100 * t.p).toFixed(1)}%</span>`).join("");
+    out.innerHTML = `
+      <div class="label">Most likely first token of the next video</div>
+      <div class="tokens">${tokens}</div>
+      <ul class="list recs">${r.results.map((v, i) => `
+        <li><span class="rank">${i + 1}</span><div class="body">
+          <div style="display:flex;gap:10px;align-items:center"><span class="title">${esc(v.title) || "<span class=muted>(blank title)</span>"}</span>${sid(v.semantic_id)}</div>
+          <div class="why">
+            <span class="pill">P(first token ${v.semantic_id[0]}) ${(100 * v.why.p_first_token).toFixed(1)}%</span>
+            <span class="pill">content cos ${v.why.cosine.toFixed(2)}</span>
+            ${v.why.followed_count > 0 ? `<span class="pill good">followed a watched video ${v.why.followed_count}×</span>` : ""}
+            ${v.why.shared_prefix.depth > 0 ? `<span class="pill">shares ${v.why.shared_prefix.depth}-token prefix with “${esc(v.why.shared_prefix.with.slice(0, 40))}”</span>` : ""}
+            <span class="muted">${v.views} views</span>
+          </div></div></li>`).join("")}</ul>
+      <div class="label" style="margin-top:10px">Scored 19,738 videos in ${r.recommend_ms} ms on the replica</div>`;
+  } catch (err) {
+    out.innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  }
+};
+
+(async () => {
+  renderWatched();
+  try {
+    const meta = await api("/api/meta");
+    const e = meta.eval;
+    const rows = [
+      ["Hybrid", "hybrid"], ["Semantic IDs", "semantic_id"],
+      ["Video-to-video transitions", "item_transitions"], ["Content", "content_only"],
+      ["Most popular", "popularity_only"],
+    ];
+    const pct = (x) => (100 * x).toFixed(1) + "%";
+    $("eval").innerHTML = `
+      <p style="margin:0 0 12px;color:var(--muted)">Each held-out user's last video is the target; the three before it are the history.
+        “In top 10” is how often the target lands in the top 10 of ${meta.videos.toLocaleString()} videos.</p>
+      <table><tr><th></th><th>In top 10</th><th>In top 50</th><th>New videos, top 50</th></tr>
+      ${rows.map(([label, key]) => `<tr><td>${label}</td><td>${pct(e.warm[key]["hit@10"])}</td>
+        <td>${pct(e.warm[key]["hit@50"])}</td><td>${pct(e.cold[key]["hit@50"])}</td></tr>`).join("")}</table>
+      <p style="margin:12px 0 0;color:var(--muted)">“New videos” removes 10% of videos from training entirely and scores the
+        ${e.cold.users} users whose next video was one of them. Video-to-video transitions cannot rank a video with no
+        views; on those, plain content similarity still does best, so treat semantic-ID transitions as a way to bring new
+        titles into the <em>history</em> more than a way to surface them as <em>candidates</em>.</p>`;
+  } catch (err) {
+    $("eval").innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>
