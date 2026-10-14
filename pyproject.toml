@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest==8.4.2"]
+dev = ["pytest==9.0.3"]
 
 [tool.setuptools.packages.find]
 include = ["semantic_ids*"]
