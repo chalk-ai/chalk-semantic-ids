@@ -12,6 +12,8 @@ from typing import Iterable, Mapping
 
 from .settings import MAX_TITLE_LENGTH
 
+DEFAULT_SAMPLE_USERS = 100
+
 
 def _integer(value, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, Integral) or value < 0:
@@ -92,6 +94,27 @@ def parse_watch_examples(
                 "split": split,
             })
     return rows
+
+
+def select_training_data(
+    titles_raw: bytes, watches_raw: bytes, *, max_users: int = DEFAULT_SAMPLE_USERS,
+    seed: int = 0, full_catalog: bool = False,
+) -> tuple[list[dict], list[dict]]:
+    """Select complete user histories and every catalog item those users watched.
+
+    Validate the complete source against the original title catalog before
+    selecting users or filtering titles. Held-out targets and their preceding
+    histories remain intact. The full-catalog option changes only title coverage.
+    """
+    if type(full_catalog) is not bool:
+        raise ValueError("full_catalog must be a boolean")
+    titles = parse_titles(titles_raw)
+    examples = parse_watch_examples(watches_raw, catalog_ids={row["id"] for row in titles},
+                                    max_users=max_users, seed=seed)
+    if not full_catalog:
+        used = {video for row in examples for video in [*row["history_ids"], row["target_id"]]}
+        titles = [row for row in titles if row["id"] in used]
+    return titles, examples
 
 
 def build_catalog(rows: Iterable[Mapping]) -> list[dict]:

@@ -124,9 +124,11 @@ def train(args, kind):
             "checkpoint_every": 20 if kind == "tokenizer" else 1,
         }
         if kind == "tokenizer":
-            if args.holdout >= project["datasets"]["titles"]["rows"]:
+            title_count = project["datasets"]["titles"]["rows"]
+            holdout = args.holdout if args.holdout is not None else min(1000, max(1, title_count // 10))
+            if holdout >= title_count:
                 raise ValueError("--holdout must leave at least one title for training")
-            config["holdout"] = args.holdout
+            config["holdout"] = holdout
         else:
             config.update(catalog_revision=project["datasets"]["catalog"]["revision_id"],
                           tokenizer_version=project["training"]["tokenizer"]["model_version"])
@@ -264,8 +266,12 @@ def parser(stage=None):
     data.add_argument("--api-server", help="API origin; defaults to this repository's Chalk authentication")
     data.add_argument("--titles", type=Path, default=ROOT / "data/MicroLens-100k_title_en.csv")
     data.add_argument("--watches", type=Path, default=ROOT / "data/MicroLens-100k_pairs.tsv")
-    data.add_argument("--max-users", type=_positive, default=5000)
-    data.add_argument("--seed", type=_nonnegative, default=0)
+    data.add_argument("--max-users", type=_positive,
+                      help="Sample this many complete user histories; defaults to 100 for new projects or the saved selection")
+    data.add_argument("--seed", type=_nonnegative,
+                      help="Sampling seed; defaults to 0 for new projects or the saved seed")
+    data.add_argument("--full-catalog", action="store_true", default=None,
+                      help="Upload all source titles instead of only videos watched by the sampled users")
     for kind, epochs, batch in (("tokenizer", 400, 1024), ("recommender", 10, 256)):
         training = commands.add_parser(f"train-{kind}", help=f"Run native Chalk {kind} training")
         training.add_argument("--epochs", type=_positive, default=epochs)
@@ -281,7 +287,8 @@ def parser(stage=None):
         training.add_argument("--restart-failed", action="store_true",
                               help="Submit current code for a FAILED run with no checkpoint; preserve its record and reuse datasets")
         if kind == "tokenizer":
-            training.add_argument("--holdout", type=_positive, default=1000)
+            training.add_argument("--holdout", type=_positive,
+                                  help="Held-out titles; defaults to 10%% of the catalog, capped at 1,000")
     transfer = commands.add_parser("import-recommender", help="Import compatible pretrained weights and their original catalog")
     transfer.add_argument("--source-environment", required=True)
     transfer.add_argument("--source-api-server", required=True)

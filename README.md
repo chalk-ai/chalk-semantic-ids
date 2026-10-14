@@ -90,11 +90,6 @@ The five stages below use feature branch `semantic` consistently. You can omit
 deployment. Datasets, native runs and registered models belong to the environment;
 the branch selects the feature graph used by a query.
 
-**Current verification:** 143 offline tests pass, native tokenizer training has
-completed, and an imported recommender has served a hosted request. The complete
-MicroLens materialization and downstream training path remains incomplete.
-See [verification](#verification) for the measured results and limitations.
-
 ## 1. Prepare data and train the tokenizer
 
 ```bash
@@ -110,18 +105,30 @@ and [watch sequences](data/MicroLens-100k_pairs.tsv), then uploads two named Cha
 Dataset revisions. It prints their names, revisions and row counts. Titles may
 contain unquoted commas, so parsing splits on the first comma only.
 
-By default, preparation samples 5,000 users. `train/prepare.py --max-users N`
-changes the watch-history sample; it does not reduce the title catalog. Each user's earlier
-watch positions become training examples, the penultimate target becomes
-validation, and the last target becomes test. MicroLens provides sequence order,
-not event timestamps. Catalog content can include titles from held-out
-interactions; their next-watch labels are excluded from recommender optimization.
+For a fresh checkout, preparation selects **100 users** and includes only the
+video titles watched by those users. Every history and target video is included,
+so the selected catalog covers training, validation and test examples. With the
+included files, the default produces **648 titles** and **582 next-video examples**:
+382 training, 100 validation and 100 test.
+
+`--max-users N` changes the user count; `--full-catalog` opts into every title in
+the source file. The command prints the uploaded Dataset row counts.
+Existing receipts keep their recorded selection when no selection flags are
+overridden; these defaults do not silently replace a previously prepared Dataset.
+
+Each user's earlier watch positions become training examples, the penultimate
+target becomes validation, and the last target becomes test. MicroLens provides
+sequence order, not event timestamps. Catalog content can include titles from
+held-out interactions; their next-watch labels are excluded from recommender
+optimization.
 
 [train/run.py](train/run.py) defines the native `@training` function and its
 numerical training body; the command submits it using `.run_training()`. MiniLM
-embedding computation and RQ-VAE optimization happen in Chalk. The default is 400 epochs
-with 1,000 held-out titles; for a smaller title Dataset, choose `--holdout N` with
-`N` smaller than its row count. The MiniLM revision is pinned in
+embedding computation and RQ-VAE optimization happen in Chalk. The default is
+400 epochs. The holdout is chosen automatically as one tenth of the selected
+titles, with at least one title and a cap of 1,000. Use `--holdout N` to override
+it; `N` must leave at least one title for training. The default sample holds out
+64 titles and trains on the other 584. The MiniLM revision is pinned in
 [settings.py](semantic_ids/settings.py).
 
 Chalk owns scheduling, retries and checkpoint storage. Recovery saves weights,
@@ -176,8 +183,7 @@ requested registered model version and cache it per replica.
 
 Functions scale from zero to two replicas. `target_queue_depth=1` lets queued
 feature calls start workers when queue autoscaling is configured. Startup and
-artifact downloads can add first-request latency; image build time and cold-start
-latency have not been benchmarked.
+artifact downloads can add first-request latency.
 
 **Continue when:** `Ready: semantic-id-tokenize and semantic-id-recommend` prints.
 
@@ -232,7 +238,7 @@ not load them. Both Functions retain authentication and Chalk identity.
 The command checks coverage and tokenizer version, saves feature values in a
 Chalk Dataset, and records its revision. The saved feature has three learned
 codes; catalog construction for recommender training derives the fourth collision
-token. A completed full materialization is reused on subsequent calls.
+token. A completed materialization of the prepared catalog is reused on subsequent calls.
 
 Feature deployment uses [requirements-query.txt](requirements-query.txt), allowing
 Chalk's query runtime to resolve its compatible PyArrow version. Local development
@@ -272,7 +278,7 @@ training, validation and test metrics.
 
 ```bash
 uv run python serve/run.py \
-  --branch semantic --model-source trained --history 16657 915
+  --branch semantic --model-source trained --history 9830 121
 ```
 
 [serve/run.py](serve/run.py) queries `recommendation.result`, which uses
@@ -282,57 +288,58 @@ count. The JSON response contains video IDs, titles, semantic tokens and scores;
 watched videos are excluded. Scores are summed token log probabilities, not
 click-through probabilities.
 
-Histories are ordered oldest to newest. Change `--history` to other IDs from the
-model's catalog; the command accepts up to 500 history IDs. Serving defaults to
-six results, and `--top-k` accepts 1–20. Evaluation remains at ten results.
+The example history is from the default sample. For another selection, use video
+IDs from your prepared catalog. Histories are ordered oldest to newest; the
+command accepts up to 500 history IDs. Serving defaults to six results, and
+`--top-k` accepts 1–20. Evaluation remains at ten results.
 Encoding additional titles does not extend this model's bundled catalog.
 
-## Option: serve an already-trained recommender
+## Option: import a pretrained semantic-ID recommender
 
-You can import compatible weights together with their original catalog and skip
-new materialization and recommender training. This path requires a saved target,
-an existing `semantic-id-recommend` Function and an applied feature graph.
-**For a fresh environment, the current CLI still requires tokenizer training and
-registration before `host/run.py`; importing a recommender does not bypass that gate.**
-There is no separate initialization or recommender-only deployment command.
+[serve/import_model.py](serve/import_model.py) imports a registered
+recommender from another environment together with its original catalog. This
+reuses compatible weights and skips new materialization and recommender training.
+It requires a saved semantic-ID target, an existing `semantic-id-recommend`
+Function and an applied feature graph. For a fresh semantic-ID deployment,
+`host/run.py` still requires tokenizer training and registration; importing a
+recommender does not bypass that requirement.
 
-The verified source below is private Demo-3: access to its environment and model
-is required. Configure source access using normal Chalk credentials without
-changing the saved destination. In the existing FTQA checkout, import is already
-complete; go directly to the recommendation command.
+Use a source environment and model you can access; no external demonstration
+artifact is required or bundled with this repository:
 
 ```bash
 uv run python serve/import_model.py \
-  --source-environment clk4b6a3d6c \
-  --source-api-server https://api.chalk.ai \
-  --source-model semantic-demo-recommender \
-  --source-version 4 \
+  --source-environment YOUR_SOURCE_ENVIRONMENT_ID \
+  --source-api-server https://YOUR_SOURCE_API_HOST \
+  --source-model YOUR_SOURCE_MODEL_NAME \
+  --source-version SOURCE_VERSION \
   --dry-run
 ```
 
-The dry run downloads the source artifact and validates its catalog, checkpoint
-and local recommendations without registering a target model or changing receipts.
-Rerun the same command without `--dry-run` to register it as a new destination
-version of `semantic-id-recommender`. Source and destination version numbers can
-differ. Registration preserves source provenance; it does not create a target
-training run. Repeating a completed import reuses its saved version.
+The dry run downloads and validates the checkpoint, catalog and local
+recommendations without registering a destination version or changing receipts.
+Repeat without `--dry-run` to register it as `semantic-id-recommender` in the saved
+destination. The new version keeps source provenance and does not create a native
+training run. Repeating a completed import reuses the saved version.
 
 ```bash
 uv run python serve/run.py \
-  --branch semantic --model-source imported --history 1001897 1004997
+  --branch semantic --model-source imported --history HISTORY_ID_1 HISTORY_ID_2
 ```
 
-This source model contains 1,600 videos and was trained natively in Chalk on
-35,000 **synthetic** watch examples, using its own tokenizer version 2. Its codes
-are not the output of FTQA tokenizer version 1. It can recommend from its original
-catalog, not the complete 19,738-title MicroLens catalog. The source synthetic
-Dataset and generator are not included here, so the native commands above train
-a new MicroLens model rather than reproduce v4's weights or metrics.
+Choose history IDs from the imported catalog. The checkpoint, tokenizer lineage
+and catalog stay paired; importing does not add videos from a different catalog.
 
-| `--model-source` | Selected model |
+**Data provenance:** a reference recommender used during development contained
+1,600 videos and was trained on 35,000 synthetic watch examples using tokenizer
+version 2. That artifact and its synthetic Dataset are not bundled dependencies.
+The native walkthrough above trains on MicroLens and does not reproduce that
+reference model's weights or metrics.
+
+| `--model-source` | Selected recommender |
 | --- | --- |
 | `trained` | Requires a completed native recommender recorded by this checkout. |
-| `imported` | Requires the separately recorded imported model. |
+| `imported` | Requires the separately recorded imported recommender. |
 | `auto` (default) | Prefers a completed native recommender; otherwise uses the imported model. |
 
 ## Progress and recovery
@@ -386,37 +393,9 @@ training configuration. Dataset and checkpoint names are scoped per experiment.
 | --- | --- |
 | `CallFunction failed (unauthenticated): Jwt is missing` | Apply the current queued `F.catalog_call_async` feature graph to the queried branch, confirm Function-queue authentication is provisioned, and retain `authenticated=True`. Existing training and Functions can be reused. |
 | Queued requests remain pending at zero replicas | Confirm `target_queue_depth=1`, environment queue autoscaling and worker readiness. Redeploy outdated Function definitions with `uv run python host/run.py`; workers for the same Function names can consume pending calls that have not expired. |
-| Offline query heartbeat timeout | Inspect query logs and Scaling Group health; elapsed waiting is not proof of row-level progress. The recorded tokenizer worker crashes and full-query failure remain under investigation. |
+| A query times out | Inspect query logs and Scaling Group health. Use `materialize/run.py --limit 5` with the same branch to test a small request before retrying the prepared catalog. |
 
-## Verification
-
-The following results were recorded on **2026-10-13**, using FTQA environment
-`tmnmc9beyujew`, API `https://api.staging.chalk.dev`, and feature branch `semantic`.
-They distinguish a working imported serving path from the incomplete full
-MicroLens training path.
-
-| Check | Recorded result |
-| --- | --- |
-| Offline tests | **143 passed**; network access is blocked by test fixtures. |
-| Prepared Datasets | 19,738 video titles and 31,020 recommendation examples |
-| Native tokenizer | `semantic-id-tokenizer` v1; run `ac4437a4-b137-4899-9066-f0498aa58542`; 400 epochs; holdout reconstruction MSE **0.001736** |
-| Functions and features | Both Functions registered; feature graph applied to `semantic` |
-| Downstream serving | Demo-3 `semantic-demo-recommender` v4 imported as FTQA `semantic-id-recommender` v1; one hosted request succeeded |
-
-Full MicroLens materialization has not been verified complete, and its downstream
-recommender has not been trained. An earlier full query failed with a heartbeat
-timeout; a tokenizer worker separately restarted with exit code 139. The native
-crash cause and its relationship to the query timeout remain unconfirmed. The
-imported serving success does not establish that tokenizer materialization is fixed.
-
-The imported artifact passed local validation and the FTQA download matched the
-source bytes. A hosted request using history `1001897 1004997` returned
-`execution: chalk`, `model_version: 1` and six results with titles, tokens and
-scores, excluding both history IDs. Its first result was `4576766`, “Travel:
-Beginner guide to city walking tours.” No new training, deployment, feature apply
-or materialization was needed for that import and query. Repeatability, throughput
-and cold-start latency were not measured. The source catalog fingerprint is
-`d8f4674788e8c7c96363fbd731c5102a43c77bfe9f087cd0b030e8c446d11572`.
+## Tests and hosted checks
 
 Run the offline suite with:
 
@@ -428,8 +407,8 @@ Tests cover parsing and splits, decoding and metrics, model/catalog identity,
 interrupted numerical recovery, actual SDK checkpoint serialization and pointers,
 worker import order, registration recovery, queued feature serialization, serving
 configuration, import provenance and branch routing. They do not invoke live Chalk.
-Keep [uv.lock](uv.lock) with the release; installation in a fresh checkout remains
-a separate check.
+Use [uv.lock](uv.lock) to reproduce the dependency set when installing from a
+fresh checkout.
 
 To compare a hosted tokenizer with its exact registered checkpoint:
 
@@ -473,7 +452,7 @@ commands still work and dispatch to the same stage implementations.
 runtime behavior.
 
 The relevant training code was adapted from `conference-demo/semantic_recommender`
-and runs independently here. This is the source mapping, verified on 2026-10-13:
+and runs independently here:
 
 | Source path in that package | Local adaptation |
 | --- | --- |
@@ -527,9 +506,9 @@ representative. Identical titles inflate similarity because their embeddings mat
 | Two tokens | 15,201 | 1 | 39% |
 
 Two-token groups were more similar but mostly singletons; one-token groups were
-more useful for inspecting broad neighborhoods. The original deployment matched
-local checkpoint codes for five held-out videos. These are historical tokenizer
-measurements, not recommendation metrics or proof of the current pipeline.
+more useful for inspecting broad neighborhoods. These are historical tokenizer
+measurements, not recommendation metrics or expected results for the smaller
+default sample.
 
 Original [artifacts/](artifacts/) preserve those outputs. Their weights lack the
 encoder provenance required by current hosting. The current loader restores

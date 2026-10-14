@@ -2,7 +2,7 @@
 
 import pytest
 
-from semantic_ids.data import build_catalog, parse_titles, parse_watch_examples
+from semantic_ids.data import build_catalog, parse_titles, parse_watch_examples, select_training_data
 from semantic_ids.settings import MAX_TITLE_LENGTH
 
 
@@ -52,6 +52,39 @@ def test_watch_sampling_is_reproducible_without_changing_split_membership():
     assert len({row["user_id"] for row in first}) == 3
     all_rows = parse_watch_examples(raw, {1, 2, 3, 4, 5}, max_users=20, seed=7)
     assert {row["id"] for row in first} <= {row["id"] for row in all_rows}
+
+
+def test_small_catalog_keeps_every_selected_history_and_held_out_target():
+    titles = b"".join(f"{video},title {video}\n".encode() for video in range(1, 12))
+    watches = b"a\t1 2 3 4 5\nb\t6 7 8 9 10\n"
+    catalog, examples = select_training_data(titles, watches, max_users=1, seed=0)
+    expected = parse_watch_examples(watches, set(range(1, 12)), max_users=1, seed=0)
+    used = {video for row in expected for video in row["history_ids"] + [row["target_id"]]}
+    assert examples == expected
+    assert {row["id"] for row in catalog} == used
+    assert len(catalog) == 5
+    assert [row["split"] for row in examples] == ["train", "train", "validation", "test"]
+    assert (catalog, examples) == select_training_data(titles, watches, max_users=1, seed=0)
+    full, same_examples = select_training_data(titles, watches, max_users=1, seed=0, full_catalog=True)
+    assert full == parse_titles(titles)
+    assert same_examples == examples
+
+
+def test_default_selection_limits_users_and_their_catalog():
+    titles = b"".join(f"{video},title {video}\n".encode() for video in range(480))
+    watches = b"".join(f"user-{user}\t{' '.join(str(user * 4 + offset) for offset in range(4))}\n".encode()
+                       for user in range(120))
+    catalog, examples = select_training_data(titles, watches)
+    assert len({row["user_id"] for row in examples}) == 100
+    assert len(catalog) == 400
+    assert len(examples) == 300
+
+
+def test_small_selection_validates_unknown_items_even_in_unselected_users():
+    # Seed zero selects b. Invalid a must still fail before the sample is taken.
+    with pytest.raises(ValueError, match="unknown catalog video"):
+        select_training_data(b"1,one\n2,two\n3,three\n4,four\n",
+                             b"a\t1 2 3 999\nb\t1 2 3 4\n", max_users=1, seed=0)
 
 
 @pytest.mark.parametrize("raw,error", [

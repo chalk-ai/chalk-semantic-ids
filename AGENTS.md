@@ -1,6 +1,7 @@
 # Customer semantic-ID example
 
-Work in this repository on `main`. The target is FTQA (`tmnmc9beyujew`,
+Work in this repository on `rk/polish`, the owner's accepted working branch.
+The target is FTQA (`tmnmc9beyujew`,
 `https://api.staging.chalk.dev`), with feature branch `semantic`. The owner has
 explicitly authorized adapting the relevant model and native training code from
 `conference-demo/semantic_recommender` into this repository. Keep stage-specific
@@ -31,10 +32,24 @@ The imported model's receipt is `.semantic-ids/imported-recommender.json`, separ
 from the native training receipt `.semantic-ids/project.json`. Preserve both,
 including while a materialization command may still be running.
 
-## Immediate delivery scope
+## Customer-facing scope
+
+The owner wants a small, reproducible semantic-ID walkthrough with all human
+documentation in README.md. Keep internal run status, test-pass counts, environment
+IDs, session timings and incident history out of the customer README; retain
+honest data and model provenance. Do not imply that the complete hosted native
+pipeline has been validated without evidence.
+
+Fresh preparation defaults to 100 selected users and only their watched-video
+catalog. `--max-users` changes the user count; `--full-catalog` opts into all source
+titles. Preserve saved selections when preparation is repeated without overrides.
+Tokenizer holdout defaults to 10% of selected titles, capped at 1,000, unless the
+caller explicitly supplies a valid holdout. Preserve existing receipts and runs.
+
+## Internal delivery record
 
 The imported recommender works through the existing FTQA Function and Chalk
-feature: one hosted request passed, and 143 offline tests passed on 2026-10-13.
+feature: one hosted request passed, and 160 offline tests passed on 2026-10-13.
 Its bundled 1,600-video catalog and synthetic source training are accepted for this
 example; document that provenance honestly. Do not turn this single hosted check
 into a claim about repeated requests, throughput or cold-start latency. Full
