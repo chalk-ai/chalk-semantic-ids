@@ -4,10 +4,11 @@
 # requires-python = ">=3.12,<3.14"
 # dependencies = ["pandas", "pyarrow"]
 # ///
-"""Show the titles sharing a semantic ID prefix — the check that the IDs mean something.
+"""Browse shared semantic-ID prefixes in the original local Parquet artifact.
 
 A prefix is only worth calling "semantic" if the videos under it look related to a
 human. This prints the groups so that claim can be judged rather than asserted.
+It does not query the current Chalk-hosted tokenizer or recommendation model.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ ARTIFACTS = pathlib.Path(__file__).resolve().parent.parent / "artifacts"
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ids", type=pathlib.Path, default=ARTIFACTS / "semantic_ids.parquet")
-    parser.add_argument("--prefix", nargs="*", type=int, help="e.g. --prefix 37 812 to filter on the first two tokens")
+    parser.add_argument("--prefix", nargs="*", type=int, help="e.g. --prefix 37 81 to filter on the first two tokens")
     parser.add_argument("--groups", type=int, default=8, help="How many prefix groups to show when none is given")
     parser.add_argument("--per-group", type=int, default=8)
     args = parser.parse_args()

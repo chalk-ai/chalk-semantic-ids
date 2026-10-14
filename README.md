@@ -1,133 +1,529 @@
-# Semantic IDs for MicroLens videos
+# How to use semantic IDs with Chalk
 
-Turns a short-video title into a small tuple of discrete tokens — a *semantic ID* —
-so that videos with related content share a prefix, and a video nobody has ever
-watched is addressable the moment it appears.
+Train a tokenizer that turns video titles into discrete semantic IDs, expose
+those IDs as a Chalk feature, and train a recommender that generates them. This
+repository contains the models, native Chalk training jobs, hosted Functions and
+feature definitions needed for that pipeline. The folders follow the five steps:
 
+```text
+train/              prepare.py uploads data; run.py trains the tokenizer
+host/               run.py deploys Functions; verify.py checks tokenizer consistency
+materialize/        run.py computes video.codes through the hosted tokenizer
+train-recommender/  run.py trains the downstream recommender
+serve/              run.py queries recommendations; import_model.py reuses a model
+semantic_ids/       shared model classes, data, configuration and recovery helpers
+features.py         Chalk feature graph
 ```
-title ──▶ sentence encoder ──▶ 384-d vector ──▶ RQ-VAE ──▶ [37, 812, 41]
-                                                              │
-                                      videos sharing [37, 812] are related
+
+Each stage's `run.py` contains that stage's implementation. Run these files from
+the repository root; the shared package keeps model artifact imports stable.
+
+## How semantic IDs work
+
+A video normally has an arbitrary database ID. Here it also gets a short sequence
+of tokens learned from its title, so videos with related content can share parts
+of their representation.
+
+1. **Encode the title.** A pinned MiniLM sentence encoder maps the title to a
+   normalized, 384-dimensional vector.
+2. **Learn three codes.** An RQ-VAE—a residual-quantized VQ-VAE—compresses that
+   vector into a 32-dimensional latent. Three codebooks, each with 256 entries,
+   successively approximate the latent and the residual left by the previous
+   level. The selected entry indices form three learned tokens.
+3. **Make each catalog entry unique.** Different videos can receive the same
+   three tokens. Catalog construction appends a fourth token assigned by sorted
+   video ID within each collision group. This token is deterministic, not learned.
+4. **Learn what comes next.** A small GRU recommender reads the viewer's ordered
+   history and learns to generate the next video's four-token sequence.
+5. **Return an actual video.** Constrained decoding permits only token sequences
+   in the model's bundled catalog, maps them back to video IDs and titles, and
+   excludes previously watched videos.
+
+The RQ-VAE learns by reconstructing the input title embeddings from its quantized
+representation. Its training objective combines reconstruction error with a
+quantization loss that aligns the latent vectors and codebook entries. MiniLM
+stays fixed during this training. Learning which video follows a watch history is
+a separate task handled by downstream recommender training.
+
+Token numbers are learned codebook indices, not named topics. Shared prefixes can
+capture content similarity, but that alone does not establish recommendation
+quality. A new title can be encoded by the tokenizer; adding its video to the
+recommender's fixed catalog requires a compatible training artifact.
+
+```text
+Video title → MiniLM embedding → RQ-VAE → three learned codes
+                                                ↓
+                                   deterministic collision token
+                                                ↓
+                                      four-token catalog ID
+                                                ↓
+Ordered watch history → GRU → constrained token generation → next videos
 ```
 
-The shape follows TIGER (Rajput et al., *Recommender Systems with Generative
-Retrieval*): an MLP encoder into a small latent, then residual vector quantization,
-where each level quantizes what the previous levels could not represent. That is what
-makes the first token coarse and later tokens refining, and it is why a shared prefix
-carries meaning.
+Chalk provides the operational path: Datasets supply training data, native
+training produces registered models, Scaling Groups run inference, and
+`F.catalog_call_async` exposes that inference as feature values.
 
-## Pipeline
+## Before running
 
-| Step | Script | Output |
-| --- | --- | --- |
-| Fetch data | `data/` (see below) | 19,738 titles, 100k user sequences |
-| Embed titles | `src/embed_titles.py` | `artifacts/title_embeddings.npy` |
-| Train quantizer | `src/train_rqvae.py` | `artifacts/rqvae.pt`, `artifacts/semantic_ids.parquet` |
-| Measure | `src/evaluate_ids.py` | `artifacts/prefix_coherence.json` |
-| Look | `src/inspect_prefix.py` | prefix groups, printed |
-| Serve | `src/deploy_function.py` | a Chalk function: title → tokens |
-| Prove cold start | `src/verify_cold_start.py` | serving vs local agreement on held-out videos |
+Use Python 3.12 or 3.13, `uv`, the Chalk CLI, and an environment with Datasets,
+native Model Training, Model Registry, Functions/Scaling Groups and feature
+deployment enabled. Authenticated Function queues and queue autoscaling must be
+provisioned; ask Chalk to confirm `function_queue_auth_enabled` for your
+environment. Training and inference request 2 CPUs and 8 GiB per worker.
 
-Every script is a `uv` script with inline dependencies — run them directly, no venv to
-manage.
-
-## Data
-
-MicroLens-100K, from the [dataset site](https://recsys.westlake.edu.cn/). The directory
-index returns 403, but the files fetch directly:
+Run commands from the repository root:
 
 ```bash
-mkdir -p data && cd data
-UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122 Safari/537.36"
-curl -sS -A "$UA" -O https://recsys.westlake.edu.cn/MicroLens-100k-Dataset/MicroLens-100k_title_en.csv
-curl -sS -A "$UA" -O https://recsys.westlake.edu.cn/MicroLens-100k-Dataset/MicroLens-100k_pairs.tsv
+uv sync
+chalk config
 ```
 
-`MicroLens-100k_title_en.csv` is `<id>, <title>` with **unquoted** titles that contain
-commas, so it must be split on the first comma only — `read_csv(sep=",")` shreds a third
-of the rows. The pairs file (user → watch sequence) is downloaded for the sequential
-model that comes next; nothing here consumes it yet.
+Configure your normal Chalk credentials, set `project` in [chalk.yaml](chalk.yaml)
+to your project's name, and read the Environment ID and API Server from
+`chalk config`. `semantic-ids` in that file is a placeholder. Use your target in
+step 1; subsequent Python commands reuse it and reject conflicting environment
+variables. `chalk apply` uses the CLI configuration, which must match that target.
 
-## Results
+The five stages below use feature branch `semantic` consistently. You can omit
+`--branch semantic` from both `chalk apply` and queries to use the default feature
+deployment. Datasets, native runs and registered models belong to the environment;
+the branch selects the feature graph used by a query.
 
-Trained on 18,738 titles with 1,000 held out, 3 levels x 256 codes, 32-d latent:
+## 1. Prepare data and train the tokenizer
 
-| Metric | Value | Reading |
-| --- | --- | --- |
-| Codes used per level | 256 / 256 / 256 | no codebook collapse |
-| Unique semantic IDs | 19,239 of 19,738 | 2.5% collide, broken by a 4th dedup token |
-| Reconstruction MSE | 0.00151 train / 0.00173 holdout | small gap, so the codes generalize |
-| Reconstruction cosine | 0.64 | 3 bytes keep much, not all, of a 384-d vector |
-| **Intra-prefix cosine, 2 tokens** | **0.720** (0.622 on distinct titles) | vs **0.127** corpus baseline |
-| **Intra-prefix cosine, 1 token** | **0.331** (0.322 on distinct titles) | same baseline |
+```bash
+uv run python train/prepare.py \
+  --environment YOUR_ENVIRONMENT_ID \
+  --api-server https://YOUR_CHALK_API_HOST
 
-Two honest caveats behind those numbers.
-
-**Duplicates flatter the eyeball test.** MicroLens has 72 blank titles and 377 rows in
-duplicate-title sets, and they dominate the largest prefix groups — so inspecting the
-biggest group mostly proves the encoder maps identical strings to identical vectors.
-Collapsing duplicates drops 2-token coherence from 0.720 to 0.622, still ~5x baseline.
-The structure is real; just do not measure it on the duplicates.
-
-**Depth trades coherence against coverage**, and at this corpus size the trade is
-sharp:
-
-| Prefix | Distinct prefixes | Median group | Videos with a neighbour | Coherence |
-| --- | --- | --- | --- | --- |
-| 1 token | 256 | 76 | 100% | 0.33 (2.5x baseline) |
-| 2 tokens | 15,201 | 1 | 39% | 0.62 (5x baseline) |
-
-256x256 is 65k cells for 20k videos, so most 2-token prefixes hold exactly one video.
-For the "show me everything under this prefix" demo, **use one token** — 256 groups of
-~76 videos, every video included. Two tokens is the right depth for tight
-neighbourhoods, not for browsing. Shrinking the level-0 codebook (64 instead of 256)
-would densify the 2-token groups if a deeper browsable prefix is what you want.
-
-## Cold start, measured
-
-`src/verify_cold_start.py` takes videos held out of RQ-VAE training, sends their titles
-to the deployed function, and compares the tokens that come back to what the local model
-assigns:
-
-```
-serving matches local assignment on 5/5 held-out videos
+uv run python train/run.py
 ```
 
-Exact agreement matters more than it looks: a mismatch means the serving path has
-drifted from training — a different encoder revision, a stale checkpoint, or codebooks
-reseeded at inference — and every ID minted in production would then be quietly wrong.
+[train/prepare.py](train/prepare.py) reads the included [MicroLens titles](data/MicroLens-100k_title_en.csv)
+and [watch sequences](data/MicroLens-100k_pairs.tsv), then uploads two named Chalk
+Dataset revisions. It prints their names, revisions and row counts. Titles may
+contain unquoted commas, so parsing splits on the first comma only.
 
-The neighbours it prints are the demo itself. An unseen title,
-*"words hang this! Starchy sausage without meat yyds~"*, lands on prefix `[220, 147]`
-alongside *"it's delicious to dip the sole of a shoe let alone a pork belly sizzling with
-oil"* and *"Teacher Sha personally cooked for the big eagle to do luxury pilaf!"* — a
-food cluster, reached with no retraining and no ID-embedding table.
+For a fresh checkout, preparation selects **100 users** and includes only the
+video titles watched by those users. Every history and target video is included,
+so the selected catalog covers training, validation and test examples. With the
+included files, the default produces **648 titles** and **582 next-video examples**:
+382 training, 100 validation and 100 test.
 
-## Serving
+`--max-users N` changes the user count; `--full-catalog` opts into every title in
+the source file. The command prints the uploaded Dataset row counts.
+Existing receipts keep their recorded selection when no selection flags are
+overridden; these defaults do not silently replace a previously prepared Dataset.
 
-`src/deploy_function.py` deploys a `chalkcompute` function to the ftqa environment
-(`tmnmc9beyujew`) that takes a title and returns its tokens. The title encoder and the
-RQ-VAE checkpoint are both baked into the image, so a replica needs no Hugging Face
-fetch on the critical path and works without egress.
+Each user's earlier watch positions become training examples, the penultimate
+target becomes validation, and the last target becomes test. MicroLens provides
+sequence order, not event timestamps. Catalog content can include titles from
+held-out interactions; their next-watch labels are excluded from recommender
+optimization.
 
-Two things to know about the SDK:
+[train/run.py](train/run.py) defines the native `@training` function and its
+numerical training body; the command submits it using `.run_training()`. MiniLM
+embedding computation and RQ-VAE optimization happen in Chalk. The default is
+400 epochs. The holdout is chosen automatically as one tenth of the selected
+titles, with at least one title and a cap of 1,000. Use `--holdout N` to override
+it; `N` must leave at least one title for training. The default sample holds out
+64 titles and trains on the other 584. The MiniLM revision is pinned in
+[settings.py](semantic_ids/settings.py).
 
-- **`.remote()` is the wire call.** Calling the decorated function directly runs the
-  body in your own process; here that fails with `No module named 'torch'`, since the
-  deploy script's venv has no torch — an honest error that looks like a packaging bug.
-- **`wait_ready()` defaults to 120s**, which a ~3GB image cannot meet from cold. This
-  passes 1800s.
+Chalk owns scheduling, retries and checkpoint storage. Recovery saves weights,
+optimizer state, epoch, random state and quantizer initialization flags. Before
+restoring, the runtime verifies run, configuration and data identity. The final
+artifact is registered as `semantic-id-tokenizer` with an immutable version.
 
-The codebooks are seeded lazily from real residuals during training, so the serving
-path marks them initialized after loading the checkpoint; otherwise the first inference
-vector would reseed them and every ID after that would be wrong.
+**Continue when:** the command prints `Registered semantic-id-tokenizer version`
+and reconstruction metrics. The printed native run ID identifies its logs and
+metrics in Chalk's Training page. Rerunning the command reconnects to its saved
+run and original configuration; it does not start a new experiment.
 
-## Next
+## 2. Host inference on Scaling Groups
 
-- **Sequential model**: train SASRec or a T5-style decoder over `[user history → next
-  semantic ID]` using `MicroLens-100k_pairs.tsv`, already downloaded.
-- **Beyond titles**: the same quantizer accepts any content vector. MicroLens publishes
-  extracted image/video/audio features, and the cover images and audio are downloadable
-  per video; a multimodal vector would sharpen the clusters that titles alone blur.
-- **Materialize as features**: expose `semantic_id_0..2` as Chalk features so the tokens
-  are joinable at query time rather than living in a parquet file.
+```bash
+uv run python host/run.py
+```
+
+This registers `semantic-id-tokenize` and `semantic-id-recommend`, provisions their
+Scaling Groups and waits for readiness. The CLI requires a registered tokenizer
+before deployment. Model loading is lazy, so the recommender Function can become
+ready before its model is trained in step 4.
+
+[host/run.py](host/run.py) puts literal `@chalkcompute.function(...)`
+decorators directly above the typed handlers. For example, its tokenizer handler
+passes the explicit version to [hosting.py](semantic_ids/hosting.py):
+
+```python
+@chalkcompute.function(
+    name=TOKENIZER_FUNCTION, image=image, cpu="2", memory="8Gi",
+    min_replicas=0, max_replicas=2, chalk_identity=True, authenticated=True,
+    target_queue_depth=1,
+    call_timeout=1800, env=runtime_env,
+    concurrency=2,
+)
+def semantic_tokenize(title: str, model_version: int) -> list[int]:
+    from semantic_ids.hosting import tokenize_title
+
+    return tokenize_title(title, model_version)
+```
+
+The image and environment are defined in that module. Decoration initiates
+registration; `.wait_ready()` waits for it, so import this deployment module only
+when deploying. `RemoteFunction.from_name()` attaches to an existing Function
+for invocation.
+
+Both model images install `torch==2.9.1+cpu` before the remaining pinned packages.
+The serving image downloads the pinned encoder during its build and saves it at
+`/opt/encoder`; Hugging Face offline flags are applied only at runtime. Inference
+therefore uses the packaged encoder. Workers use Chalk identity to download the
+requested registered model version and cache it per replica.
+
+Functions scale from zero to two replicas. `target_queue_depth=1` lets queued
+feature calls start workers when queue autoscaling is configured. Startup and
+artifact downloads can add first-request latency.
+
+**Continue when:** `Ready: semantic-id-tokenize and semantic-id-recommend` prints.
+
+## 3. Materialize semantic IDs as a Chalk feature
+
+Apply the feature graph to the same environment selected in step 1, then try five
+titles through the hosted tokenizer:
+
+```bash
+chalk config
+chalk apply --branch semantic
+uv run python materialize/run.py --branch semantic --limit 5
+```
+
+`--limit` selects the first N title rows before submitting inference. The SDK still
+reads the title Dataset, but only those rows reach the tokenizer. The command
+prints the returned features and times the Dataset read separately from the Chalk
+query, whose elapsed time includes queueing, startup, inference and download.
+Sample results use a separate Dataset and do not replace the saved training
+catalog. A sample is a diagnostic, not a smaller recommender-training run.
+
+To build the training catalog, omit the limit:
+
+```bash
+uv run python materialize/run.py --branch semantic
+```
+
+**Materialization runs inference with the already-trained tokenizer. It does not
+train either model.** This is the integration in [features.py](features.py):
+
+```python
+import pyarrow as pa
+import chalk.functions as F
+from chalk.features import features, _
+
+@features
+class Video:
+    id: int
+    title: str
+    tokenizer_version: int
+    codes: list[int] = F.catalog_call_async(
+        "function.semantic-id-tokenize", _.title, _.tokenizer_version,
+        output_type=pa.list_(pa.int64()),
+    )
+```
+
+[materialize/run.py](materialize/run.py) submits the offline query with IDs,
+titles and the immutable tokenizer version, and requests `video.codes`. Chalk queues the hosted Function calls and waits for their
+results. PyTorch and the encoder run on the Scaling Group; the query worker does
+not load them. Both Functions retain authentication and Chalk identity.
+
+The command checks coverage and tokenizer version, saves feature values in a
+Chalk Dataset, and records its revision. The saved feature has three learned
+codes; catalog construction for recommender training derives the fourth collision
+token. A completed materialization of the prepared catalog is reused on subsequent calls.
+
+Feature deployment uses [requirements-query.txt](requirements-query.txt), allowing
+Chalk's query runtime to resolve its compatible PyArrow version. Local development
+and model images have their separate pinned dependencies.
+
+**Continue when:** `Materialized` prints with the feature count and Dataset
+revision. Inspect that Dataset for titles, `video.tokenizer_version` and three
+`video.codes` values per video.
+
+## 4. Train a recommender from the materialized feature
+
+```bash
+uv run python train-recommender/run.py
+```
+
+[train-recommender/run.py](train-recommender/run.py) contains the second native
+training definition and numerical body. It receives the watch-example Dataset
+and reads the pinned semantic-feature Dataset. It joins histories and targets to the
+catalog by video ID, then trains the GRU's embeddings and decoder for 10 epochs
+by default. Training examples preserve chronological histories, and validation
+and test labels stay outside optimization.
+
+The job reports validation and test Recall@10, NDCG@10 and token loss. Recall@10
+measures how often the next video appears in the top ten; NDCG@10 rewards placing
+that video nearer the top. Loss and Recall appear in the training dashboard;
+the full report, including NDCG, is stored with the artifact. These measurements
+do not establish online engagement lift.
+
+The completed artifact includes the weights and exact token-to-video catalog,
+and is registered as `semantic-id-recommender`. Checkpoint recovery retains
+optimizer, epoch and random state, just as tokenizer training does.
+
+**Continue when:** `Registered semantic-id-recommender version` prints with the
+training, validation and test metrics.
+
+## 5. Query recommendations through Chalk
+
+```bash
+uv run python serve/run.py \
+  --branch semantic --model-source trained --history 9830 121
+```
+
+[serve/run.py](serve/run.py) queries `recommendation.result`, which uses
+`F.catalog_call_async` to call
+the hosted recommender with the saved model version, history and requested result
+count. The JSON response contains video IDs, titles, semantic tokens and scores;
+watched videos are excluded. Scores are summed token log probabilities, not
+click-through probabilities.
+
+The example history is from the default sample. For another selection, use video
+IDs from your prepared catalog. Histories are ordered oldest to newest; the
+command accepts up to 500 history IDs. Serving defaults to six results, and
+`--top-k` accepts 1–20. Evaluation remains at ten results.
+Encoding additional titles does not extend this model's bundled catalog.
+
+## Option: import a pretrained semantic-ID recommender
+
+[serve/import_model.py](serve/import_model.py) imports a registered
+recommender from another environment together with its original catalog. This
+reuses compatible weights and skips new materialization and recommender training.
+It requires a saved semantic-ID target, an existing `semantic-id-recommend`
+Function and an applied feature graph. For a fresh semantic-ID deployment,
+`host/run.py` still requires tokenizer training and registration; importing a
+recommender does not bypass that requirement.
+
+Use a source environment and model you can access; no external demonstration
+artifact is required or bundled with this repository:
+
+```bash
+uv run python serve/import_model.py \
+  --source-environment YOUR_SOURCE_ENVIRONMENT_ID \
+  --source-api-server https://YOUR_SOURCE_API_HOST \
+  --source-model YOUR_SOURCE_MODEL_NAME \
+  --source-version SOURCE_VERSION \
+  --dry-run
+```
+
+The dry run downloads and validates the checkpoint, catalog and local
+recommendations without registering a destination version or changing receipts.
+Repeat without `--dry-run` to register it as `semantic-id-recommender` in the saved
+destination. The new version keeps source provenance and does not create a native
+training run. Repeating a completed import reuses the saved version.
+
+```bash
+uv run python serve/run.py \
+  --branch semantic --model-source imported --history HISTORY_ID_1 HISTORY_ID_2
+```
+
+Choose history IDs from the imported catalog. The checkpoint, tokenizer lineage
+and catalog stay paired; importing does not add videos from a different catalog.
+
+**Data provenance:** a reference recommender used during development contained
+1,600 videos and was trained on 35,000 synthetic watch examples using tokenizer
+version 2. That artifact and its synthetic Dataset are not bundled dependencies.
+The native walkthrough above trains on MicroLens and does not reproduce that
+reference model's weights or metrics.
+
+| `--model-source` | Selected recommender |
+| --- | --- |
+| `trained` | Requires a completed native recommender recorded by this checkout. |
+| `imported` | Requires the separately recorded imported recommender. |
+| `auto` (default) | Prefers a completed native recommender; otherwise uses the imported model. |
+
+## Progress and recovery
+
+```bash
+uv run python -m semantic_ids.cli status
+```
+
+This reads local receipts without contacting Chalk. Native recommender “not
+submitted” is expected when serving only an imported model. Keep both receipts:
+
+| Receipt | Contents |
+| --- | --- |
+| `.semantic-ids/project.json` | Target, source identities, Dataset revisions, native run IDs and trained model versions |
+| `.semantic-ids/imported-recommender.json` | Imported source, target version, catalog identity and provenance |
+
+Neither contains credentials or model weights. Authoritative Datasets, runs,
+checkpoints and models live in Chalk. Do not manually edit receipts or remove them
+to retry a command: that can lose the connection to existing resources. Import
+uses its separate receipt while a materialization may still be writing the main
+one; importing does not cancel a separately running materialization.
+
+### Interrupted native commands
+
+| Situation | Action |
+| --- | --- |
+| Preparation or observation of a known training run was interrupted | Rerun the same command; completed uploads or the saved native run are reused. |
+| Submission began but no run ID was saved | Inspect Chalk's Training page; use `train/run.py --run-id EXISTING_RUN_ID` if a run exists, or `--retry-submission` only if none exists. |
+| Training finished but model registration was interrupted | Inspect the registry; use `train/run.py --model-version EXISTING_VERSION` for the matching artifact, or `--retry-registration` only if no version exists. |
+| A startup failure needs a new run after its cause is fixed | Use `train/run.py --restart-failed`; it requires a confirmed failed run with no checkpoint or publication, preserves its history, and resubmits the saved configuration. |
+| The target conflicts with the environment or API server | Compare the receipt, `chalk config` and environment variables; restore the intended target before retrying. |
+
+Prefix those paths with `uv run python`; use `train-recommender/run.py` for a
+recommender run. Reconnection verifies the completed
+artifact's run, configuration and Dataset identities before registering it. A
+mistyped external run ID is not saved before validation. Running, completed or
+checkpointed runs cannot be replaced with `--restart-failed`.
+
+For an interrupted import, rerun its original source arguments with
+`--model-version EXISTING_VERSION` to verify and attach the target version.
+Use `--retry-registration` only after confirming no target version was created.
+Pass these flags to `serve/import_model.py`, not a native training script.
+
+To change data or training configuration, use a separate checkout and prepare a
+new experiment. Changing flags while reconnecting keeps the original saved
+training configuration. Dataset and checkpoint names are scoped per experiment.
+
+### Hosted feature troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| `CallFunction failed (unauthenticated): Jwt is missing` | Apply the current queued `F.catalog_call_async` feature graph to the queried branch, confirm Function-queue authentication is provisioned, and retain `authenticated=True`. Existing training and Functions can be reused. |
+| Queued requests remain pending at zero replicas | Confirm `target_queue_depth=1`, environment queue autoscaling and worker readiness. Redeploy outdated Function definitions with `uv run python host/run.py`; workers for the same Function names can consume pending calls that have not expired. |
+| A query times out | Inspect query logs and Scaling Group health. Use `materialize/run.py --limit 5` with the same branch to test a small request before retrying the prepared catalog. |
+
+## Tests and hosted checks
+
+Run the offline suite with:
+
+```bash
+uv run pytest
+```
+
+Tests cover parsing and splits, decoding and metrics, model/catalog identity,
+interrupted numerical recovery, actual SDK checkpoint serialization and pointers,
+worker import order, registration recovery, queued feature serialization, serving
+configuration, import provenance and branch routing. They do not invoke live Chalk.
+Use [uv.lock](uv.lock) to reproduce the dependency set when installing from a
+fresh checkout.
+
+To compare a hosted tokenizer with its exact registered checkpoint:
+
+```bash
+uv run python host/verify.py
+```
+
+This downloads the checkpoint and pinned encoder, computes local reference codes
+for held-out titles, and invokes the hosted tokenizer. It checks consistency;
+it does not measure recommendation quality or cold-start latency.
+
+For full hosted validation, complete the five stages and verify the final
+checkpoint/version for both runs, the exact saved materialization revision and
+tokenizer version, held-out metrics, and recommendations excluding watched items.
+For another imported release, validate the artifact, register it, query its
+explicit target version and confirm repeat calls use that same saved version.
+Record the tested commit and dependency versions alongside those results.
+
+## Code and training source
+
+| Stage | Files and implementation |
+| --- | --- |
+| 1. Train the tokenizer | [train/prepare.py](train/prepare.py) uploads the Datasets; [train/run.py](train/run.py) defines and runs native tokenizer training. |
+| 2. Host inference | [host/run.py](host/run.py) declares and deploys both Functions; [host/verify.py](host/verify.py) compares hosted and local tokenizer codes. |
+| 3. Materialize features | [materialize/run.py](materialize/run.py) owns the offline query; [features.py](features.py) declares the lightweight feature graph. |
+| 4. Train the recommender | [train-recommender/run.py](train-recommender/run.py) defines and runs native recommender training. |
+| 5. Serve recommendations | [serve/run.py](serve/run.py) owns the online query; [serve/import_model.py](serve/import_model.py) invokes the model-import workflow. |
+
+The shared `semantic_ids/` package contains [model classes](semantic_ids/model.py),
+[RQ-VAE](semantic_ids/rqvae.py), [data helpers](semantic_ids/data.py),
+[pinned settings](semantic_ids/settings.py), [artifact loading](semantic_ids/hosting.py),
+[checkpoint helpers](semantic_ids/training_runtime.py), [receipts](semantic_ids/project.py),
+and [import validation](semantic_ids/importing.py). Model classes remain at their
+existing import paths so registered artifacts continue to load.
+
+[cli.py](semantic_ids/cli.py) retains argument parsing, native submission/recovery
+orchestration, registration and local status. Existing `python -m semantic_ids.cli`
+commands still work and dispatch to the same stage implementations.
+[import_cli.py](semantic_ids/import_cli.py) maintains the separate import receipt.
+[semantic_ids/__init__.py](semantic_ids/__init__.py) marks the package and has no
+runtime behavior.
+
+The relevant training code was adapted from `conference-demo/semantic_recommender`
+and runs independently here:
+
+| Source path in that package | Local adaptation |
+| --- | --- |
+| `rqvae.py` | [rqvae.py](semantic_ids/rqvae.py), byte-identical at comparison time |
+| `model.py` | [model.py](semantic_ids/model.py), retaining semantic training, decoding and save/load; removes ordinary-ID baseline support and adds stricter validation |
+| `training.py` | [train/run.py](train/run.py) and [train-recommender/run.py](train-recommender/run.py) hold native definitions; [cli.py](semantic_ids/cli.py) handles submission, reconnects and registration. |
+| `training_runtime.py` | Numerical bodies live in the two training stage files; [shared helpers](semantic_ids/training_runtime.py) retain checkpoint, configuration and identity handling plus compatibility delegates. |
+| `tests/test_training_checkpoints.py` | [test_training_checkpoint_sdk.py](tests/test_training_checkpoint_sdk.py), offline tests using the SDK serializer, checkpoint layout and latest pointer with remote calls mocked |
+
+The source controller, comparison/promotion workflow, synthetic generator, UI,
+configuration and credentials are not part of this implementation.
+
+## Adapt this to your data
+
+Replace the MicroLens parsers with your source integration, retain stable video
+IDs, and define chronological training/evaluation boundaries. `Video.codes` is the
+feature boundary: join its codes into your examples and embed each position in
+your downstream model. The included GRU is one consumer of those codes.
+
+Keep the tokenizer version, semantic-feature revision and training catalog paired.
+Titles must contain at most 2,000 characters; preparation rejects longer titles
+before upload. The included data comes from [MicroLens](https://recsys.westlake.edu.cn/);
+review its terms before redistribution or another use.
+
+<details>
+<summary>Historical local tokenizer experiment</summary>
+
+The original experiment trained on 18,738 MicroLens title embeddings and held
+out 1,000. It used 384-dimensional MiniLM vectors, a 32-dimensional latent and
+three 256-entry codebooks, following the residual-quantization approach used in
+TIGER (Rajput et al., <em>Recommender Systems with Generative Retrieval</em>).
+Watch sequences were available but were not used to train a downstream model.
+
+| Metric | Historical result |
+| --- | --- |
+| Codes used per level | 256 / 256 / 256 |
+| Unique three-token IDs | 19,239 of 19,738; approximately 2.5% collide |
+| Reconstruction MSE | 0.00151 train / 0.00173 holdout |
+| Reconstruction cosine | 0.64 |
+| Mean cosine within a two-token prefix | 0.720; 0.622 after filtering blank and duplicate-title rows |
+| Mean cosine within a one-token prefix | 0.331; 0.322 after filtering |
+| Corpus cosine baseline | 0.127 |
+
+There were 72 blank titles and 377 rows in duplicate-title sets. Filtering
+excluded every row whose title appeared more than once, rather than keeping one
+representative. Identical titles inflate similarity because their embeddings match.
+
+| Prefix length | Distinct prefixes | Median group size | Videos with a neighbor |
+| --- | --- | --- | --- |
+| One token | 256 | 76 | 100% |
+| Two tokens | 15,201 | 1 | 39% |
+
+Two-token groups were more similar but mostly singletons; one-token groups were
+more useful for inspecting broad neighborhoods. These are historical tokenizer
+measurements, not recommendation metrics or expected results for the smaller
+default sample.
+
+Original [artifacts/](artifacts/) preserve those outputs. Their weights lack the
+encoder provenance required by current hosting. The current loader restores
+quantizer initialization so inference does not reseed trained codebooks.
+[src/train_rqvae.py](src/train_rqvae.py),
+[src/deploy_function.py](src/deploy_function.py) and
+[src/verify_cold_start.py](src/verify_cold_start.py) remain compatibility launchers
+for the stage implementations, without duplicate numerical training code.
+[src/embed_titles.py](src/embed_titles.py), [src/evaluate_ids.py](src/evaluate_ids.py)
+and [src/inspect_prefix.py](src/inspect_prefix.py) remain useful local tools for
+these historical artifacts.
+
+</details>
+
+References: [Model Training](https://docs.chalk.ai/docs/model_training),
+[Functions](https://docs.chalk.ai/docs/compute/functions),
+[queued catalog calls](https://docs.chalk.ai/docs/model_deployments),
+[Datasets](https://docs.chalk.ai/docs/datasets).
