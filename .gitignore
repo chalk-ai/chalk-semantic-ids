@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.semantic-ids/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+work/
