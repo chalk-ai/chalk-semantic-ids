@@ -1,0 +1,6 @@
+project: semantic-ids
+environments:
+  default:
+    # A branch deploy must match the runtime of the environment's main deployment.
+    runtime: "python311"
+    requirements: requirements.txt

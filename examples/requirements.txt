@@ -1,0 +1,2 @@
+chalkpy==2.162.5
+pydantic

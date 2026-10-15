@@ -27,6 +27,7 @@ carries meaning.
 | Look | `src/inspect_prefix.py` | prefix groups, printed |
 | Serve | `src/deploy_function.py` | a Chalk function: title → tokens |
 | Prove cold start | `src/verify_cold_start.py` | serving vs local agreement on held-out videos |
+| Call from Chalk | [`examples/`](examples/README.md) | Chalk SQL, chalkdf and a stream resolver calling the function |
 
 Every script is a `uv` script with inline dependencies — run them directly, no venv to
 manage.
@@ -129,5 +130,6 @@ vector would reseed them and every ID after that would be wrong.
 - **Beyond titles**: the same quantizer accepts any content vector. MicroLens publishes
   extracted image/video/audio features, and the cover images and audio are downloadable
   per video; a multimodal vector would sharpen the clusters that titles alone blur.
-- **Materialize as features**: expose `semantic_id_0..2` as Chalk features so the tokens
-  are joinable at query time rather than living in a parquet file.
+- **Materialize as features**: [`examples/`](examples/README.md) computes the tokens as a
+  Chalk feature, from a stream of uploads or at query time. Splitting them into
+  `semantic_id_0..2` would make each level joinable on its own.
