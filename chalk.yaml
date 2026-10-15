@@ -1,0 +1,6 @@
+# Use your own Chalk project name and select its environment before running.
+project: semantic-ids
+environments:
+  default:
+    runtime: python312
+    requirements: requirements-query.txt

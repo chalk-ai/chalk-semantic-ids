@@ -1,0 +1,5 @@
+# Feature workers only. Training dependencies belong in the training image.
+# chalkpy[training] conflicts with the query runtime's datadog dependency.
+chalkpy[runtime]==2.160.0
+# Chalk's query runtime selects the compatible Arrow version.
+pyarrow
