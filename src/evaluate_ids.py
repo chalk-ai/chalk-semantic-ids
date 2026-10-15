@@ -4,13 +4,14 @@
 # requires-python = ">=3.12,<3.14"
 # dependencies = ["numpy", "pandas", "pyarrow"]
 # ///
-"""Measure whether a shared semantic-ID prefix actually means "semantically similar".
+"""Measure prefix coherence in the original local semantic-ID artifacts.
 
 Eyeballing prefix groups is misleading on this dataset: MicroLens titles include many
 exact and near duplicates, so the largest groups look coherent for a trivial reason.
-This compares intra-prefix cosine similarity against the corpus baseline, and repeats
-the comparison after collapsing duplicate titles, which is the number that actually
-supports the claim.
+This compares intra-prefix cosine similarity against the corpus baseline, then
+repeats it after excluding blank titles and every row in a duplicate-title set.
+These are tokenizer-content diagnostics, not recommendation-quality metrics.
+This utility does not query or evaluate the current Chalk-hosted models.
 """
 
 from __future__ import annotations
