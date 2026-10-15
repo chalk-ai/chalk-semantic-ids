@@ -4,11 +4,12 @@
 # requires-python = ">=3.12,<3.14"
 # dependencies = ["sentence-transformers", "numpy", "pandas", "pyarrow"]
 # ///
-"""Embed MicroLens video titles into the content vectors the RQ-VAE quantizes.
+"""Historical utility for generating local MicroLens title-embedding artifacts.
 
-The same model has to run at serving time for an unseen title, so it is small and
-CPU-friendly on purpose: a 384-dim MiniLM is ~90MB, which keeps the deployed
-function's image small and its cold start short.
+The original experiment used a pretrained MiniLM without a recorded revision.
+This utility preserves that behavior and the original row order. The current
+how-to computes embeddings inside native Chalk tokenizer training using the
+pinned encoder in semantic_ids/settings.py; it does not consume these files.
 """
 
 from __future__ import annotations
