@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.cache/
+artifacts/recommender.npz
+artifacts/recommender_titles.json
