@@ -1,16 +1,16 @@
 """Call the deployed semantic-ID model from Chalk three ways: Chalk SQL, chalkdf, and a stream resolver.
 
 `src/deploy_function.py` deploys the model under the name `semantic-id-embed`. In the environment's catalog
-that is `function.semantic-id-embed`: `function.` plus the deploy `--name`, not the Python function's name.
+that is `function.semantic-id-embed`, matching the fixed deployment name in the example.
 It takes one title and returns its tokens, `[level 0, level 1, level 2]` (`list<int64>`).
 
 This directory is a Chalk project, so the `Video` features and the stream resolver below deploy with it:
 
     cd examples
     chalk apply --branch semantic-ids
-    CHALK_ENVIRONMENT=<env id> python calling_from_chalk.py sql       # Chalk SQL
-    CHALK_ENVIRONMENT=<env id> python calling_from_chalk.py chalkdf   # chalkdf job
-    CHALK_ENVIRONMENT=<env id> python calling_from_chalk.py stream    # stream resolver, no Kafka needed
+    python calling_from_chalk.py sql       # Chalk SQL
+    python calling_from_chalk.py chalkdf   # chalkdf job
+    python calling_from_chalk.py stream    # stream resolver, no Kafka needed
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 
 [`calling_from_chalk.py`](calling_from_chalk.py) shows the three ways Chalk reaches the model that
 [`src/deploy_function.py`](../src/deploy_function.py) deploys. All three name it the same way,
-`function.semantic-id-embed`: `function.` plus the deploy `--name`, not the Python function's name.
+`function.semantic-id-embed`, matching the fixed deployment name in the example.
 
 | Example | Call | Run |
 | --- | --- | --- |
@@ -14,7 +14,6 @@
 ```bash
 cd examples
 chalk apply --branch semantic-ids                       # deploys Video and the stream resolver on a branch
-export CHALK_ENVIRONMENT=<env id>
 python calling_from_chalk.py sql
 python calling_from_chalk.py chalkdf
 python calling_from_chalk.py stream                     # test_streaming_resolver: no Kafka cluster needed

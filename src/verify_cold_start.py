@@ -2,7 +2,7 @@
 #
 # /// script
 # requires-python = ">=3.12,<3.14"
-# dependencies = ["chalkcompute", "pyyaml", "pandas", "pyarrow"]
+# dependencies = ["chalkcompute", "pandas", "pyarrow"]
 # ///
 """Check the deployed function on videos the RQ-VAE never trained on.
 
@@ -25,26 +25,21 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import chalk_creds  # noqa: E402
 
 ARTIFACTS = pathlib.Path(__file__).resolve().parent.parent / "artifacts"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--env-id", default="tmnmc9beyujew")
-    parser.add_argument("--api-server", default=chalk_creds.DEFAULT_API_SERVER)
-    parser.add_argument("--function", default="semantic-id-embed")
     parser.add_argument("--ids", type=pathlib.Path, default=ARTIFACTS / "semantic_ids.parquet")
     parser.add_argument("--samples", type=int, default=8)
     parser.add_argument("--neighbours", type=int, default=4, help="Existing videos to show per matched prefix")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
-    chalk_creds.apply_to_environ(args.api_server, args.env_id)
     from chalkcompute import RemoteFunction
 
-    remote = RemoteFunction.from_name(args.function)
+    remote = RemoteFunction.from_name('semantic-id-embed')
 
     frame = pd.read_parquet(args.ids)
     level_columns = [column for column in frame.columns if column.startswith("semantic_id_") and column[-1].isdigit()]
