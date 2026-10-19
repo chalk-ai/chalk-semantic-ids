@@ -8,9 +8,9 @@ This directory is a Chalk project, so the `Video` features and the stream resolv
 
     cd examples
     chalk apply --branch semantic-ids
-    CHALK_ENVIRONMENT=<env id> python calling_from_chalk.py sql       # Chalk SQL
-    CHALK_ENVIRONMENT=<env id> python calling_from_chalk.py chalkdf   # chalkdf job
-    CHALK_ENVIRONMENT=<env id> python calling_from_chalk.py stream    # stream resolver, no Kafka needed
+    python calling_from_chalk.py sql       # Chalk SQL
+    python calling_from_chalk.py chalkdf   # chalkdf job
+    python calling_from_chalk.py stream    # stream resolver, no Kafka needed
 """
 
 from __future__ import annotations
