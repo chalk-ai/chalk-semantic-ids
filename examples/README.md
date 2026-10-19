@@ -14,7 +14,6 @@
 ```bash
 cd examples
 chalk apply --branch semantic-ids                       # deploys Video and the stream resolver on a branch
-export CHALK_ENVIRONMENT=<env id>
 python calling_from_chalk.py sql
 python calling_from_chalk.py chalkdf
 python calling_from_chalk.py stream                     # test_streaming_resolver: no Kafka cluster needed
