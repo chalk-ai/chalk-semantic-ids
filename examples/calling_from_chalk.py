@@ -1,7 +1,7 @@
 """Call the deployed semantic-ID model from Chalk three ways: Chalk SQL, chalkdf, and a stream resolver.
 
 `src/deploy_function.py` deploys the model under the name `semantic-id-embed`. In the environment's catalog
-that is `function.semantic-id-embed`: `function.` plus the deploy `--name`, not the Python function's name.
+that is `function.semantic-id-embed`, matching the fixed deployment name in the example.
 It takes one title and returns its tokens, `[level 0, level 1, level 2]` (`list<int64>`).
 
 This directory is a Chalk project, so the `Video` features and the stream resolver below deploy with it:

@@ -11,8 +11,8 @@ content vector from the same title encoder used in training, and the frozen
 codebooks turn that vector into tokens — so the video is addressable by existing
 recommenders immediately, with no ID-embedding table to retrain.
 
-    ./deploy_function.py                       # deploy, then smoke-test it
-    ./deploy_function.py --title "cat cooks dinner"
+    ./deploy_function.py # deploy, then smoke-test it
+    ./deploy_function.py
 
 Both the title encoder and the RQ-VAE weights are baked into the image, so a
 replica needs no model download at call time and no network egress to Hugging Face.
@@ -20,8 +20,6 @@ replica needs no model download at call time and no network egress to Hugging Fa
 
 from __future__ import annotations
 
-import argparse
-import os
 import pathlib
 import sys
 
@@ -75,24 +73,6 @@ def semantic_id_for_title(title: str) -> list[int]:
     return [int(code) for code in codes[0]]
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--env-id", default=None, help="Override the active Chalk environment")
-    parser.add_argument("--api-server", default=None)
-    parser.add_argument("--name", default="semantic-id-embed")
-    parser.add_argument("--cpu", default="2")
-    parser.add_argument("--memory", default="8Gi")
-    parser.add_argument(
-        "--title",
-        action="append",
-        default=None,
-        help="Title to score after deploying (repeatable). Defaults to a few unseen ones.",
-    )
-    parser.add_argument("--skip-smoke-test", action="store_true")
-    parser.add_argument("--ready-timeout", type=float, default=1800.0)
-    return parser.parse_args()
-
-
 DEFAULT_TITLES = [
     "grandma teaches me how to fold dumplings",
     "unboxing the new electric scooter and riding it downtown",
@@ -101,12 +81,7 @@ DEFAULT_TITLES = [
 
 
 def main() -> int:
-    args = parse_args()
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-    if args.api_server:
-        os.environ["CHALK_API_SERVER"] = args.api_server
-    if args.env_id:
-        os.environ["CHALK_ENVIRONMENT"] = args.env_id
 
     weights = ARTIFACTS / "rqvae.pt"
     if not weights.is_file():
@@ -131,7 +106,7 @@ def main() -> int:
     )
 
     deploy = chalkcompute.function(
-        image=image, name=args.name, cpu=args.cpu, memory=args.memory
+        image=image, name='semantic-id-embed', cpu='2', memory='8Gi'
     )
     try:
         deployed = deploy(semantic_id_for_title)
@@ -144,18 +119,16 @@ def main() -> int:
         print(f"deploy poll gave up early ({exc}); re-attaching and waiting")
         from chalkcompute import RemoteFunction
 
-        deployed = RemoteFunction.from_name(args.name)
-        deployed.wait_ready(timeout=args.ready_timeout)
+        deployed = RemoteFunction.from_name('semantic-id-embed')
+        deployed.wait_ready(timeout=1800.0)
 
-    print(f"deployed {args.name} to {args.env_id}")
+    print("deployed function.semantic-id-embed")
 
-    if args.skip_smoke_test:
-        return 0
     # The image carries torch and the encoder; a cold replica has to pull ~3GB before it
     # can serve, so give readiness a lot more than the 120s default.
-    deployed.wait_ready(timeout=args.ready_timeout)
+    deployed.wait_ready(timeout=1800.0)
     failures = 0
-    for title in args.title or DEFAULT_TITLES:
+    for title in DEFAULT_TITLES:
         try:
             # `.remote()` is the wire call. Calling the decorated function directly runs
             # the body in this process instead, which fails here for an honest reason:

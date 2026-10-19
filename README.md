@@ -106,8 +106,7 @@ food cluster, reached with no retraining and no ID-embedding table.
 ## Serving
 
 `src/deploy_function.py` deploys a `chalkcompute` function to the environment selected
-by your existing Chalk login. It takes a title and returns its tokens. Use `--env-id`
-or `--api-server` to explicitly override your login settings. The title encoder and the
+by your existing Chalk login. It takes a title and returns its tokens. The title encoder and the
 RQ-VAE checkpoint are both baked into the image, so a replica needs no Hugging Face
 fetch on the critical path and works without egress.
 
