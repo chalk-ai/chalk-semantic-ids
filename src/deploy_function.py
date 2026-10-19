@@ -2,7 +2,7 @@
 #
 # /// script
 # requires-python = ">=3.12,<3.14"
-# dependencies = ["chalkcompute", "pyyaml"]
+# dependencies = ["chalkcompute"]
 # ///
 """Deploy the semantic-ID function: an unseen video title in, its semantic ID out.
 
@@ -21,6 +21,7 @@ replica needs no model download at call time and no network egress to Hugging Fa
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import sys
 
@@ -76,8 +77,8 @@ def semantic_id_for_title(title: str) -> list[int]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--env-id", default="tmnmc9beyujew", help="Chalk environment id (default: the ftqa QA env)")
-    parser.add_argument("--api-server", default="https://api.staging.chalk.dev")
+    parser.add_argument("--env-id", default=None, help="Override the active Chalk environment")
+    parser.add_argument("--api-server", default=None)
     parser.add_argument("--name", default="semantic-id-embed")
     parser.add_argument("--cpu", default="2")
     parser.add_argument("--memory", default="8Gi")
@@ -102,9 +103,10 @@ DEFAULT_TITLES = [
 def main() -> int:
     args = parse_args()
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-    import chalk_creds
-
-    chalk_creds.apply_to_environ(args.api_server, args.env_id)
+    if args.api_server:
+        os.environ["CHALK_API_SERVER"] = args.api_server
+    if args.env_id:
+        os.environ["CHALK_ENVIRONMENT"] = args.env_id
 
     weights = ARTIFACTS / "rqvae.pt"
     if not weights.is_file():

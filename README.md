@@ -105,8 +105,9 @@ food cluster, reached with no retraining and no ID-embedding table.
 
 ## Serving
 
-`src/deploy_function.py` deploys a `chalkcompute` function to the ftqa environment
-(`tmnmc9beyujew`) that takes a title and returns its tokens. The title encoder and the
+`src/deploy_function.py` deploys a `chalkcompute` function to the environment selected
+by your existing Chalk login. It takes a title and returns its tokens. Use `--env-id`
+or `--api-server` to explicitly override your login settings. The title encoder and the
 RQ-VAE checkpoint are both baked into the image, so a replica needs no Hugging Face
 fetch on the critical path and works without egress.
 
@@ -131,3 +132,9 @@ vector would reseed them and every ID after that would be wrong.
   per video; a multimodal vector would sharpen the clusters that titles alone blur.
 - **Materialize as features**: expose `semantic_id_0..2` as Chalk features so the tokens
   are joinable at query time rather than living in a parquet file.
+
+## Local authentication
+
+The SDK reads credentials, API host, and the selected environment from your existing
+`chalk login` in `~/.chalk.yml`, including project-scoped and default logins.
+Standard `CHALK_*` environment overrides remain supported.
